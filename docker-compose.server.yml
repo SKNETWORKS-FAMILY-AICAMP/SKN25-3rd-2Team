@@ -64,6 +64,9 @@ services:
       AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER: "true"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@arxplore-postgres:5432/${POSTGRES_DB}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://arxplore-airflow-web:8080/execution/
+      AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}
       PYTHONPATH: /opt/airflow:/opt/airflow/src
     user: "${AIRFLOW_UID:-50000}:0"
     command: bash -lc "airflow db migrate"
@@ -91,6 +94,9 @@ services:
       AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER: "true"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@arxplore-postgres:5432/${POSTGRES_DB}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://arxplore-airflow-web:8080/execution/
+      AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}
       PYTHONPATH: /opt/airflow:/opt/airflow/src
     user: "${AIRFLOW_UID:-50000}:0"
     command: airflow api-server
@@ -119,6 +125,9 @@ services:
       AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER: "true"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@arxplore-postgres:5432/${POSTGRES_DB}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://arxplore-airflow-web:8080/execution/
+      AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}
       PYTHONPATH: /opt/airflow:/opt/airflow/src
     user: "${AIRFLOW_UID:-50000}:0"
     command: airflow scheduler
@@ -145,6 +154,9 @@ services:
       AIRFLOW__CORE__EXECUTE_TASKS_NEW_PYTHON_INTERPRETER: "true"
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@arxplore-postgres:5432/${POSTGRES_DB}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-}
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://arxplore-airflow-web:8080/execution/
+      AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_API_AUTH_JWT_SECRET}
       PYTHONPATH: /opt/airflow:/opt/airflow/src
     user: "${AIRFLOW_UID:-50000}:0"
     command: airflow dag-processor
@@ -159,5 +171,11 @@ services:
 
 volumes:
   arxplore_postgres_data:
+    external: true
+    name: arxplore_server_arxplore_postgres_data
   arxplore_mongo_data:
+    external: true
+    name: arxplore_server_arxplore_mongo_data
   arxplore_airflow_logs:
+    external: true
+    name: arxplore_server_arxplore_airflow_logs

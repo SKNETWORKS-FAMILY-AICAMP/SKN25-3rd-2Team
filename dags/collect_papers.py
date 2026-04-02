@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from airflow.sdk import dag, task
 
@@ -11,8 +12,8 @@ from src.pipeline import run_collect_papers
 
 @dag(
     dag_id="arxplore_collect_papers",
-    schedule="10 16 * * *",
-    start_date=datetime(2026, 1, 1),
+    schedule="0 18 * * *",
+    start_date=datetime(2026, 1, 1, tzinfo=ZoneInfo("Asia/Seoul")),
     catchup=False,
     params={"target_date": ""},
     tags=["arxplore", "collect", "papers"],
