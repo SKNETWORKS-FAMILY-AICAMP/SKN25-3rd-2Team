@@ -2,83 +2,79 @@
 
 ## 1. 문서 목적
 
-이 문서는 ArXplore를 5인 팀이 병렬로 구현할 때 각자의 책임 범위, 소유 파일, 구현 대상, 협업 인터페이스, 산출물, 완료 기준을 구체적으로 정리한다. 현재 저장소는 초안 스캐폴드가 정리된 상태이며, 각 담당자는 자신이 소유하는 파일과 함수를 기준으로 독립적으로 구현하되 `TopicDocument` 계약과 운영 문서를 공통 인터페이스로 삼아 통합하는 방식으로 작업한다.
+이 문서는 ArXplore를 5인 팀이 병렬로 구현할 때 각자의 책임 범위, 소유 파일, 구현 대상, 협업 인터페이스, 산출물, 완료 기준을 구체적으로 정리한다. 현재 저장소는 도메인 계약과 실행 환경이 정리된 스캐폴드 상태이며, 실제 구현 단계에서는 "누가 무엇을 먼저 끝내야 다른 역할이 막히지 않는가"를 기준으로 역할을 재구성해야 한다.
 
-본 문서의 목적은 "누가 무슨 파일을 만지는가"만 적는 것이 아니다. 더 중요한 목적은 다음 세 가지다.
+이번 역할 분담의 핵심 원칙은 두 가지다.
 
-- 병렬 개발 중 충돌을 줄인다.
-- 역할 간 의존 관계와 함수 계약을 미리 고정한다.
-- 구현 전에 책임 경계를 분명히 해 통합 실패를 줄인다.
+- **텍스트 중심 논문 서비스**라는 제품 방향에 맞춰 역할을 나눈다.
+- **1번 역할이 선행 완료한 뒤 2~5번 역할이 병렬로 작업할 수 있는 구조**를 만든다.
+
+따라서 역할 분담의 목적은 단순한 파일 분배가 아니라, 초기 병목을 줄이고 병렬 개발 효율을 최대화하는 데 있다.
 
 ## 2. 기본 원칙
 
-역할 분담은 편의상 파일을 나누는 작업이 아니라, 책임을 분리해 병렬 개발을 가능하게 하는 장치다. 각 담당자는 자신의 영역에서 설계 결정을 주도할 수 있어야 하지만, 다른 담당자가 의존하는 계약은 함부로 바꾸면 안 된다.
+각 담당자는 자신의 영역에서 설계 결정을 주도할 수 있어야 한다. 하지만 다른 역할이 의존하는 입력과 출력 계약은 임의로 바꿔서는 안 된다. ArXplore는 특히 `TopicDocument` 계약, retrieval 결과 shape, pipeline 단계 이름이 여러 계층에 동시에 영향을 주므로 변경 시 문서와 코드를 함께 맞춰야 한다.
 
 공통 원칙은 다음과 같다.
 
-- 제품 방향과 구조 기준은 [PLAN.md](./PLAN.md)를 따른다.
-- 시스템 아키텍처와 계층 경계는 [ARCHITECTURE.md](./ARCHITECTURE.md)를 따른다.
+- 제품 방향과 범위는 [PLAN.md](./PLAN.md)를 따른다.
+- 계층 구조와 런타임 토폴로지는 [ARCHITECTURE.md](./ARCHITECTURE.md)를 따른다.
+- 구현 순서와 handoff 방식은 [WORKFLOW.md](./WORKFLOW.md)를 따른다.
 - 공용 데이터 계약은 `src/core/models.py`의 `TopicDocument`, `PaperRef`, `RelatedTopic`를 기준으로 한다.
 - `TopicDocument` 계약은 전원 합의 없이 변경하지 않는다.
 - DAG 정의는 가볍게 유지하고, 실제 비즈니스 로직은 `src/pipeline` 이하에 둔다.
-- 외부 서비스 연동과 저장 코드는 `src/integrations`를 기본 위치로 삼는다.
-- UI는 저장 계층이나 외부 API를 직접 두드리지 않고, 합의된 조회 경로를 사용한다.
-- 결과물이 미완성이라도 입력, 출력, 에러 정책, 의존 함수는 먼저 문서화한다.
-- 파일 소유권이 명시된 파일은 원칙적으로 해당 담당자가 수정한다.
+- UI는 저장 계층이나 외부 API를 직접 호출하지 않고, 합의된 조회 경로만 사용한다.
+- retrieval은 "최소 retrieval"과 "고도화 retrieval" 두 단계가 있을 수 있지만, 반환 형태는 가능한 한 동일하게 유지한다.
 
 ## 3. 공통 용어
 
 ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 - `paper`: 단일 논문 메타데이터
-- `paper chunk`: RAG 검색을 위한 논문 텍스트 단위
+- `paper fulltext`: PDF에서 추출한 본문 텍스트와 섹션 정보
+- `paper chunk`: RAG 검색을 위한 텍스트 단위
+- `minimum retrieval`: 1번 역할이 먼저 제공하는 최소 검색 경로
+- `vector retrieval`: 2번 역할이 고도화하는 임베딩 기반 검색 경로
 - `topic`: 유사 논문 묶음
 - `topic document`: 토픽을 설명하는 구조화 문서
 - `RAG answer`: 검색 결과 범위 안에서 생성한 응답
-
-다음 용어는 더 이상 사용하지 않는다.
-
-- 기사
-- 뉴스
-- 이슈 문서
-- source article
-- related issue
 
 ## 4. 5인 팀 기준 역할 구성
 
 | 역할 | 권장 인원 | 주 책임 |
 |------|-----------|--------|
-| **1. 인프라 · 데이터 파이프라인 담당** | 1명 | Docker, Compose, Airflow, 논문 수집, 원본 저장, arXiv 보강, 공용 설정 |
-| **2. 저장 계층 담당** | 1명 | PostgreSQL 스키마, `papers`/`topics`/`topic_documents` CRUD, 조회 함수 |
-| **3. 임베딩 · 클러스터링 · 벡터 검색 담당** | 1명 | 청크 전략, 임베딩 생성, pgvector 저장 및 검색, 토픽 그룹핑 |
-| **4. LLM · RAG 담당** | 1명 | 프롬프트, 문서 생성 체인, RAG 응답 정책, LangSmith 평가 |
+| **1. 인프라 · 데이터 파이프라인 · 적재 담당** | 1명 | Docker, Compose, Airflow, 논문 수집, MongoDB 원본 저장, PDF 본문 텍스트 파싱, PostgreSQL 적재, 최종 청크, 최소 retrieval |
+| **2. 임베딩 · 벡터 검색 · 토픽 그룹핑 담당** | 1명 | 임베딩 생성, pgvector 저장, vector retrieval, retrieval 품질 개선, 토픽 그룹핑 |
+| **3. 토픽 문서 생성 담당** | 1명 | `TopicDocument` 생성 프롬프트, 체인, 문서 생성 품질 |
+| **4. RAG 응답 담당** | 1명 | 검색 결과 조합, 응답 프롬프트, 근거 노출 정책, 검색 응답 품질 |
 | **5. UI · 문서 소비 계층 담당** | 1명 | Streamlit 검색 화면, 카드, 상세 문서, 상태 처리 |
 
-이 배치는 기능 흐름과 책임 경계에 맞춰 구성했다. 인프라 담당자가 수집 가능한 환경과 기초 데이터를 준비하면, 나머지 네 역할은 공용 계약을 기준으로 병렬 구현을 진행할 수 있다.
+이 배치는 "1번이 데이터를 준비해 놓으면 나머지가 같은 기준 데이터 위에서 병렬로 일한다"는 운영 방식을 기준으로 구성했다.
 
 ## 5. 역할 간 핵심 의존 관계
 
-### 인프라 → 저장 계층
+### 1번 → 2번
 
-- 인프라 담당자는 실제 수집 흐름과 입력 데이터 형태를 정의한다.
-- 저장 담당자는 그 입력을 받아 저장 가능한 최소 스키마와 Repository 시그니처를 확정한다.
+- 1번은 논문 메타데이터, 본문 텍스트, 최종 청크, 최소 retrieval 경로를 준비한다.
+- 2번은 이 결과를 읽어 임베딩 저장, vector retrieval, 토픽 그룹핑을 구현한다.
 
-### 저장 계층 → 임베딩 담당
+### 1번 → 3번
 
-- 저장 담당자는 `papers`, `paper_chunks` 조회 경로를 제공한다.
-- 임베딩 담당자는 이 데이터를 읽어 임베딩과 검색 구조를 만든다.
+- 1번은 `papers`, `paper_fulltexts`, `paper_chunks` 읽기 가능한 상태를 만든다.
+- 3번은 이 데이터를 바탕으로 `TopicDocument` 생성 품질을 개선한다.
 
-### 저장 계층 + 임베딩 담당 → LLM 담당
+### 1번 + 2번 → 4번
 
-- 저장 담당자는 토픽별 논문 로딩 함수를 제공한다.
-- 임베딩 담당자는 질문 기준 검색 결과를 반환하는 함수를 제공한다.
-- LLM 담당자는 이 두 경로를 사용해 문서 생성과 Q&A를 구현한다.
+- 1번은 최소 retrieval을 제공한다.
+- 2번은 나중에 동일 반환 형태의 vector retrieval로 이를 고도화한다.
+- 4번은 먼저 최소 retrieval 위에서 응답 흐름을 구현하고, 이후 2번이 만든 vector retrieval로 같은 인터페이스를 유지한 채 교체한다.
 
-### 저장 계층 + LLM 담당 → UI 담당
+### 1번 + 3번 + 4번 → 5번
 
-- 저장 담당자는 카드/상세 문서 조회 함수를 제공한다.
-- LLM 담당자는 질의응답 진입점과 응답 형태를 제공한다.
-- UI 담당자는 이 두 결과를 화면 흐름으로 연결한다.
+- 1번은 읽을 수 있는 실데이터를 준비한다.
+- 3번은 `TopicDocument`를 제공한다.
+- 4번은 검색 응답 구조를 제공한다.
+- 5번은 카드, 상세 문서, 검색 응답 UI를 렌더링한다.
 
 ## 6. 공통 계약과 보호 대상
 
@@ -91,24 +87,25 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 특히 `TopicDocument`는 다음 역할을 동시에 수행한다.
 
-- 분석 체인의 최종 출력
+- 문서 생성 체인의 최종 출력
 - PostgreSQL `topic_documents` 저장 대상
 - Streamlit 상세 문서 렌더링 입력
 - RAG 응답에서 참조하는 문서 메타데이터 구조
 
-이 계약을 바꿀 때는 적어도 다음을 함께 점검해야 한다.
+또한 retrieval 인터페이스도 공용 계약으로 취급한다. 최소 retrieval과 vector retrieval이 서로 다른 구현을 갖더라도, 가능한 한 같은 반환 형태를 유지해야 4번과 5번이 중간에 다시 흔들리지 않는다.
 
-- 프롬프트 출력
-- 체인 파서
-- DB 저장/조회
-- UI 렌더링
-- 문서 예시
+최소 공용 반환 형태는 다음을 기준으로 한다.
+
+- `chunk_id`
+- `arxiv_id`
+- `chunk_text`
+- `similarity_score`
 
 ## 7. 역할별 상세
 
-### 7-1. 인프라 · 데이터 파이프라인 담당
+### 7-1. 인프라 · 데이터 파이프라인 · 적재 담당
 
-이 역할은 "다른 팀원이 실데이터 기반으로 개발을 시작할 수 있는 환경과 데이터"를 준비한다. Docker 이미지, Compose 구성, Airflow 서비스, DAG 설계, HF Daily Papers 수집, arXiv 메타데이터 보강, MongoDB 원본 저장, 공용 환경 변수, 초기 데이터 적재를 포함한다.
+이 역할은 "다른 팀원이 즉시 붙을 수 있는 텍스트 기반 논문 데이터와 실행 환경"을 준비한다. 단순히 Docker와 Airflow를 띄우는 역할이 아니라, 논문 수집부터 PostgreSQL 적재, 최종 청크 생성, 최소 retrieval까지를 하나의 선행 완료 범위로 책임진다.
 
 #### 소유 파일
 
@@ -141,10 +138,17 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 - `src/pipeline/analyze_topics.py`
 - `src/pipeline/tracing.py`
 
-**수집 및 원본 저장**
+**수집 · 파싱 · 적재**
 
 - `src/integrations/paper_search.py`
 - `src/integrations/raw_store.py`
+- `src/integrations/paper_repository.py`
+- `src/integrations/topic_repository.py`
+
+필요 시 다음 파일을 신규 생성할 수 있다.
+
+- `src/integrations/fulltext_parser.py`
+- `src/integrations/minimum_retriever.py`
 
 **공용 설정**
 
@@ -158,36 +162,52 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 - dev 컨테이너와 server stack이 모두 정상 기동해야 한다.
 - PostgreSQL + pgvector, MongoDB, Airflow 웹/스케줄러/프로세서가 정상 연결되어야 한다.
-- `.env` 기준 설정명이 ArXplore 계약과 일치해야 한다.
+- `.env` 기준 설정명이 프로젝트 계약과 일치해야 한다.
 
-**HF Daily Papers 수집**
+**HF Daily Papers 수집과 원본 저장**
 
 - `PaperSearchClient.fetch_daily_papers(date)`를 구현한다.
-- 날짜 기준 feed를 호출하고, 실제 응답이 `list` 형태임을 반영해 처리한다.
-- 실패 시 재시도, 로깅, trace 태그 정책을 정한다.
+- 응답이 `list` 형태라는 점을 반영해 처리한다.
+- `RawPaperStore.save_daily_papers_response(date, payload)`로 MongoDB에 원본을 저장한다.
 
 **arXiv 메타데이터 보강**
 
 - `fetch_arxiv_metadata(arxiv_ids)`를 구현한다.
-- arXiv `id_list`를 사용해 초록, primary category, PDF 링크, 발행일을 보강한다.
-- 연속 호출 제한을 고려한 지연 정책을 반영한다.
+- 초록, primary category, PDF 링크, 발행일을 보강한다.
+- 재시도와 지연 정책을 반영한다.
 
-**원본 저장**
+**PDF 본문 텍스트 파싱**
 
-- `RawPaperStore.save_daily_papers_response(date, payload)`를 구현한다.
-- MongoDB에 원본 payload, 수집 날짜, 수집 시각을 저장한다.
+- PDF에서 본문 텍스트와 섹션 정보를 추출한다.
+- 표, 그림, 캡션, 수식 구조화는 현재 범위에 포함하지 않는다.
+- 추출 결과는 `paper_fulltexts` 또는 동등한 구조로 저장할 수 있도록 정리한다.
+
+**PostgreSQL 적재와 최종 청크 생성**
+
+- 논문 메타데이터, 본문 텍스트, 최종 청크를 PostgreSQL에 적재한다.
+- 이 역할이 쓰기 경로를 책임진다.
+- 청크 전략은 이 단계에서 확정한다. 2번은 청크를 새로 자르는 역할이 아니라, 이미 저장된 청크를 기반으로 임베딩과 검색을 고도화하는 역할이다.
+
+**최소 retrieval 제공**
+
+- vector retrieval이 완성되기 전에도 4번과 5번이 작업할 수 있도록, `paper_chunks` 기반 최소 retrieval 경로를 제공한다.
+- 구현은 키워드 검색, FTS, 단순 chunk lookup 중 가장 안정적인 방식으로 시작할 수 있다.
+- 반환 형태는 최종 vector retrieval과 최대한 맞춘다.
 
 **DAG 오케스트레이션**
 
 - DAG 파일은 얇게 유지한다.
 - 실제 비즈니스 로직은 `src/pipeline`에서 실행한다.
-- DAG 의존 순서와 태스크 이름을 문서화한다.
+- `collect -> prepare -> embed -> analyze` 흐름을 문서와 코드 모두에서 일관되게 유지한다.
 
 #### 다른 역할에 제공해야 할 것
 
 - 날짜 기준 원본 feed 수집 함수
 - arXiv 메타데이터 보강 함수
 - MongoDB 저장 함수
+- PostgreSQL 적재 결과
+- 최종 청크가 적재된 데이터셋
+- 최소 retrieval 인터페이스
 - `run_collect_papers()`, `run_prepare_papers()`, `run_embed_papers()`, `run_analyze_topics()` 진입점
 - 통합 테스트에 사용할 최소 실데이터
 
@@ -195,82 +215,15 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 - `setup-dev.sh`, `setup-server.sh`가 실패 없이 실행된다.
 - Airflow UI에서 `arxplore_*` 4개 DAG가 확인된다.
-- 특정 날짜의 HF Daily Papers를 MongoDB에 저장할 수 있다.
-- arXiv 보강 데이터를 저장 계층 담당자에게 넘길 수 있다.
-- 다른 담당자가 같은 DB에 접속해 실데이터를 확인할 수 있다.
+- 특정 날짜 기준 HF Daily Papers를 MongoDB에 저장할 수 있다.
+- arXiv 보강과 PDF 본문 텍스트 파싱이 된다.
+- PostgreSQL에 메타데이터, 본문 텍스트, 청크가 적재된다.
+- 최소 retrieval이 동작한다.
+- 2~5번 역할이 같은 데이터셋 위에서 바로 시작할 수 있다.
 
-### 7-2. 저장 계층 담당
+### 7-2. 임베딩 · 벡터 검색 · 토픽 그룹핑 담당
 
-이 역할의 책임은 "정제된 논문과 토픽 문서가 일관된 구조로 저장되고 다시 읽힐 수 있게 만드는 것"이다. 이 계층이 흔들리면 파이프라인, RAG, UI가 모두 불안정해진다. 따라서 저장 담당자는 함수 이름보다도 입출력 계약의 안정성을 우선해야 한다.
-
-#### 소유 파일
-
-- `src/integrations/paper_repository.py`
-- `src/integrations/topic_repository.py`
-
-#### 구현 대상
-
-**PostgreSQL 스키마 설계**
-
-다음 테이블의 컬럼, 키, 인덱스를 설계한다.
-
-- `papers`
-- `paper_chunks`
-- `topics`
-- `topic_documents`
-
-`paper_embeddings`는 임베딩 담당자가 책임진다.
-
-**자연키 결정**
-
-- `papers`는 `arxiv_id`를 자연키로 사용한다.
-- 동일 논문 재수집 시 insert가 아니라 upsert 기준으로 동작해야 한다.
-
-**`PaperRepository` 구현**
-
-최소 필요 메서드는 다음과 같다.
-
-- `save_paper(paper: dict) -> str`
-- `save_paper_chunks(arxiv_id: str, chunks: list[dict]) -> None`
-- `get_paper(arxiv_id: str) -> dict | None`
-- `list_paper_chunks(arxiv_id: str) -> list[dict]`
-- `list_papers_for_topic(topic_id: int) -> list[dict]`
-
-**`TopicRepository` 구현**
-
-최소 필요 메서드는 다음과 같다.
-
-- `save_topic(topic_id: int, title: str, keywords: list[str] | None = None) -> int`
-- `save_topic_papers(topic_id: int, arxiv_ids: list[str]) -> None`
-- `save_topic_document(document: TopicDocument) -> int`
-- `get_topic_document(topic_id: int) -> TopicDocument | None`
-- `list_topic_documents(*, limit: int = 20) -> list[TopicDocument]`
-
-#### 구현 시 유의점
-
-- `TopicDocument`를 JSONB로 저장하되, 카드 목록 조회가 가능하도록 정렬/인덱스를 고려한다.
-- `citation_count`는 optional 필드이므로 NULL 허용이 필요하다.
-- `github_url`, `github_stars`, `upvotes`도 누락 가능성을 전제로 저장해야 한다.
-- DB 드라이버 선택과 트랜잭션 정책을 문서화한다.
-
-#### 다른 역할에 제공해야 할 것
-
-- 논문 저장 함수
-- 논문 청크 저장 함수
-- 토픽 문서 저장/조회 함수
-- UI 카드용 토픽 문서 목록 조회 함수
-- 토픽별 논문 묶음 조회 함수
-
-#### 완료 기준
-
-- 논문 1건 이상을 저장하고 다시 조회할 수 있다.
-- 토픽 문서 1건 이상을 저장하고 동일 구조로 다시 읽을 수 있다.
-- 카드 UI가 소비할 목록 조회 함수가 준비되어 있다.
-- LLM 담당자와 UI 담당자가 Repository 시그니처에 의존해 개발할 수 있다.
-
-### 7-3. 임베딩 · 클러스터링 · 벡터 검색 담당
-
-이 역할의 책임은 "논문 텍스트를 벡터 검색 가능한 구조로 바꾸고, 유사 논문을 토픽으로 묶는 것"이다. 이 역할의 출력 품질은 검색 정확도와 토픽 품질을 동시에 좌우한다.
+이 역할의 책임은 "이미 적재된 청크를 검색 가능한 벡터 구조로 바꾸고, 최소 retrieval을 최종 검색 품질로 고도화하는 것"이다. 1번이 시스템을 먼저 움직이게 만드는 역할이라면, 2번은 검색 품질과 토픽 구성 품질을 책임지는 역할이다.
 
 #### 소유 파일
 
@@ -279,60 +232,61 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 필요에 따라 다음 파일을 새로 추가할 수 있다.
 
-- `src/integrations/chunker.py`
 - `src/integrations/clustering.py`
+- `src/integrations/retrieval_reranker.py`
 
 #### 구현 대상
-
-**청크 전략**
-
-- 초록을 적절한 길이로 나누는 규칙을 정한다.
-- 청크 크기, overlap, 문장/문단 기준 여부를 문서화한다.
 
 **임베딩 생성**
 
 - `EmbeddingClient.embed_texts(texts)`를 구현한다.
-- 배치 처리와 재시도 정책을 정한다.
+- 배치 처리, 재시도, 모델 선택 기준을 정한다.
 
 **pgvector 저장**
 
-- `paper_embeddings` 테이블 구조를 설계한다.
-- `VectorRepository.upsert_paper_embeddings()`를 구현한다.
+- `paper_embeddings` 테이블 구조를 설계하고 저장 경로를 구현한다.
+- `VectorRepository.upsert_paper_embeddings()`를 제공한다.
 
-**검색 함수**
+**vector retrieval**
 
 - `VectorRepository.search_paper_chunks(query_embedding, limit=5)`를 구현한다.
-- 반환값에는 `chunk_id`, `arxiv_id`, `chunk_text`, `similarity_score`가 포함되어야 한다.
+- 최소 retrieval과 동일한 반환 형태를 유지하도록 설계한다.
+- 최종적으로 4번이 검색 구현을 바꿔 끼우더라도 응답 계층은 그대로 유지되게 한다.
+
+**retrieval 품질 개선**
+
+- top-k, score 기준, 검색 실패 시 fallback 전략을 검토한다.
+- 필요 시 reranking이나 추가 검색 조건을 붙인다.
 
 **토픽 그룹핑**
 
-- 유사 논문을 토픽 단위로 묶는 로직을 구현한다.
-- 결과는 `topic_id -> arxiv_ids` 매핑으로 저장 계층에 전달할 수 있어야 한다.
+- 임베딩된 논문 또는 청크를 기준으로 유사 논문을 토픽 단위로 묶는다.
+- 결과는 `topic_id -> arxiv_ids` 매핑 형태로 제공한다.
+- 이 결과는 3번의 문서 생성 입력과 1번의 topic 저장 경로에 연결된다.
 
 #### 다른 역할에 제공해야 할 것
 
-- 청크 분할 함수 또는 규칙
 - 임베딩 생성 함수
-- 유사 청크 검색 함수
-- 토픽 그룹핑 결과
+- vector retrieval 함수
+- 토픽 그룹핑 결과 구조
+- 최소 retrieval과의 교체 기준
 
 #### 완료 기준
 
-- 논문 초록을 청크로 분할할 수 있다.
-- 생성한 벡터를 저장하고 다시 검색할 수 있다.
-- 질문 벡터 기준으로 유사 청크를 반환할 수 있다.
-- 토픽 그룹핑 결과를 저장 계층과 연결할 수 있다.
+- 저장된 청크를 임베딩할 수 있다.
+- vector retrieval이 동작한다.
+- 반환 형태가 최소 retrieval과 호환된다.
+- 토픽 그룹핑 결과를 1번과 3번이 사용할 수 있다.
 
-### 7-4. LLM · RAG 담당
+### 7-3. 토픽 문서 생성 담당
 
-이 역할은 "논문 묶음이 읽을 수 있는 토픽 문서로 바뀌는 품질"과 "검색 결과가 신뢰 가능한 답변으로 바뀌는 품질"을 함께 책임진다.
+이 역할은 "논문 묶음이 읽을 수 있는 토픽 문서로 바뀌는 품질"을 책임진다. 이 역할은 검색 응답 자체보다 `TopicDocument`라는 제품 핵심 산출물을 안정적으로 만드는 데 집중한다.
 
 #### 소유 파일
 
 - `src/core/prompts/overview.py`
 - `src/core/prompts/key_findings.py`
 - `src/core/chains.py`
-- `src/core/rag.py`
 - `src/core/tracing.py`
 
 `src/core/models.py`는 직접 소유 파일이 아니다. 계약 변경이 필요하면 문서와 함께 전원 합의를 거쳐야 한다.
@@ -342,42 +296,84 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 **프롬프트 정교화**
 
 - `overview`는 토픽 흐름을 3~5문장으로 설명해야 한다.
-- `key_findings`는 논문들의 기여, 결과, 차이를 항목형으로 정리해야 한다.
-- 추측형 문장, 과장된 평가, 근거 없는 전망을 줄이는 방향으로 다듬는다.
+- `key_findings`는 연구 기여, 공통 경향, 차이를 항목형으로 정리해야 한다.
+- 추측형 문장, 과장된 평가, 근거 없는 전망을 줄인다.
 
 **체인 안정화**
 
-- `_format_papers()`가 LLM에 전달할 입력을 잘 구성하는지 점검한다.
-- `_build_paper_refs()`와 `_build_related_topics()`가 결정적으로 조합되는지 검증한다.
+- `_format_papers()`가 논문 메타데이터와 텍스트를 적절히 LLM 입력으로 전달하는지 점검한다.
+- `_build_paper_refs()`와 `_build_related_topics()`가 결정적으로 조합되는지 확인한다.
 - `analyze_topic()`이 항상 `TopicDocument` 구조를 반환하도록 안정화한다.
 
-**RAG 응답 구현**
+**문서 생성 품질 검토**
 
-- 검색 결과 범위 안에서만 답변하게 한다.
-- 검색 결과 부족 시 응답 정책을 정한다.
-- 답변과 함께 근거 논문이나 토픽 문서를 반환하는 구조를 정의한다.
-
-**LangSmith 평가**
-
-- 프롬프트, 체인, 응답 품질을 trace로 비교한다.
-- 출력 포맷 실패나 환각 가능성이 보이면 prompt / parser / retrieval 쪽 원인을 구분한다.
+- 샘플 토픽 묶음으로 출력 품질을 반복 확인한다.
+- 문서가 "토픽 수준 요약"인지 "개별 논문 설명 모음"인지 경계가 흐려지지 않게 조정한다.
 
 #### 다른 역할에 제공해야 할 것
 
 - `analyze_topic()` 진입점
-- `answer_question()` 또는 동등한 질의응답 진입점
-- 응답 포맷 계약
-- 추적 가능한 trace 태그
+- `TopicDocument` 샘플 출력
+- 문서 생성 품질 기준과 trace 태그
 
 #### 완료 기준
 
 - 샘플 논문 묶음에서 `TopicDocument`를 안정적으로 생성할 수 있다.
-- 질의응답 진입점이 검색 결과와 함께 동작한다.
+- 개요와 핵심 발견이 역할별로 분리되어 있다.
+- 저장 가능한 형태의 문서 출력이 준비된다.
+
+### 7-4. RAG 응답 담당
+
+이 역할은 "검색 결과가 사용자에게 신뢰 가능한 응답으로 바뀌는 품질"을 책임진다. 3번이 문서를 생성하는 역할이라면, 4번은 검색 결과를 근거로 질문에 답하는 역할이다.
+
+#### 소유 파일
+
+- `src/core/rag.py`
+
+필요 시 다음 파일을 새로 추가할 수 있다.
+
+- `src/core/prompts/answer.py`
+- `src/core/retrievers.py`
+
+#### 구현 대상
+
+**응답 흐름 구현**
+
+- `answer_question()`을 구현한다.
+- 먼저 1번의 최소 retrieval 위에서 응답 흐름을 만든다.
+- 이후 2번의 vector retrieval로 같은 인터페이스를 유지한 채 교체 가능해야 한다.
+
+**응답 정책 정리**
+
+- 검색 결과 범위 안에서만 답변한다.
+- 검색 결과가 부족하면 부족하다고 말한다.
+- 근거 논문과 관련 토픽을 함께 반환한다.
+
+**retrieval 연동 정리**
+
+- 1번과 2번이 제공하는 retrieval 구현체를 같은 입력/출력 형태로 소비한다.
+- retrieval이 바뀌더라도 응답 계층이 크게 흔들리지 않도록 설계한다.
+
+**LangSmith 평가**
+
+- 응답 품질과 근거 노출 품질을 trace로 점검한다.
+- 검색 결과 부족 시 동작, 과도한 일반화 여부, 근거 노출 형식 등을 검토한다.
+
+#### 다른 역할에 제공해야 할 것
+
+- `answer_question()` 진입점
+- 응답 포맷 계약
+- 근거 논문/관련 토픽 반환 예시
+
+#### 완료 기준
+
+- 최소 retrieval 기준으로도 응답 흐름이 동작한다.
+- vector retrieval 교체 후에도 반환 형태가 유지된다.
 - 검색 결과 부족 상황에서도 과도한 환각 없이 응답한다.
 
 ### 7-5. UI · 문서 소비 계층 담당
 
-이 역할은 "현재 저장소가 사용자에게 어떤 경험으로 보이는가"를 책임진다. 즉, UI는 단순 렌더링 계층이 아니라 제품 구조를 최종적으로 드러내는 계층이다.
+이 역할은 "현재 저장소가 사용자에게 어떤 경험으로 보이는가"를 책임진다. 텍스트 중심 제품 방향에 맞게 카드, 문서, 검색 결과를 구조적으로 보여 주는 것이 핵심이다.
 
 #### 소유 파일
 
@@ -415,6 +411,7 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 **실데이터 연결 대비**
 
 - 데모 데이터와 실데이터가 같은 렌더링 경로를 타도록 구조를 정리한다.
+- 최소 retrieval과 최종 retrieval이 같은 응답 형태를 유지하도록 UI 의존성을 최소화한다.
 - DB 조회 실패, 문서 없음, 검색 결과 부족 상태를 화면에서 처리한다.
 
 #### 다른 역할에 제공해야 할 것
@@ -431,32 +428,36 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 ## 8. 역할 간 handoff 체크리스트
 
-### 인프라 담당이 넘겨야 하는 것
+### 1번이 넘겨야 하는 것
 
 - 샘플 HF Daily Papers 원본 payload
 - arXiv 보강 후 paper dict 예시
+- PDF 본문 텍스트 예시
+- 최종 청크 예시
+- 최소 retrieval 입력/출력 예시
 - `.env` 기준 환경 변수 설명
 - Airflow 실행 방법
 
-### 저장 담당이 넘겨야 하는 것
+### 2번이 넘겨야 하는 것
 
-- Repository 메서드 시그니처
-- 입력 dict 필드 규칙
-- 반환 dict / `TopicDocument` 예시
-
-### 임베딩 담당이 넘겨야 하는 것
-
-- 청크 전략
-- 검색 함수 입력/출력 예시
+- 임베딩 저장 구조
+- vector retrieval 입력/출력 예시
+- 최소 retrieval과의 호환 여부
 - 토픽 그룹핑 결과 구조
 
-### LLM 담당이 넘겨야 하는 것
+### 3번이 넘겨야 하는 것
 
 - `TopicDocument` 샘플 출력
-- 질의응답 응답 예시
-- 검색 결과 부족 시 동작 예시
+- 문서 생성 품질 기준
+- analyze trace 예시
 
-### UI 담당이 넘겨야 하는 것
+### 4번이 넘겨야 하는 것
+
+- 질문 입력과 응답 포맷 예시
+- 근거 논문/관련 토픽 반환 예시
+- 검색 결과 부족 시 응답 예시
+
+### 5번이 넘겨야 하는 것
 
 - 화면 상태 정의
 - 필요한 조회 함수 목록
@@ -472,6 +473,7 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 - Compose 서비스명
 - `.env`의 핵심 설정 키
 - 저장소 전역 용어
+- 최소 retrieval과 vector retrieval의 공용 반환 형태
 
 이 항목을 바꿔야 하면 관련 담당자와 문서부터 같이 업데이트해야 한다.
 
@@ -479,10 +481,11 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 역할별 구현이 끝났다고 보기 위한 최종 기준은 다음과 같다.
 
-- Airflow 4개 DAG가 등록되고 실행 경로가 이어진다.
-- 논문 수집부터 `TopicDocument` 저장까지 한 번의 흐름으로 연결된다.
-- 검색창에서 질문하고 근거 기반 응답을 받을 수 있다.
-- 메인 카드와 상세 문서가 실데이터를 렌더링할 수 있다.
+- 1번이 텍스트 기반 데이터 준비, 적재, 최소 retrieval까지 완료한다.
+- 2번이 vector retrieval과 토픽 그룹핑을 붙인다.
+- 3번이 `TopicDocument`를 안정적으로 생성한다.
+- 4번이 최소 retrieval과 vector retrieval 모두에서 응답 흐름을 유지한다.
+- 5번이 검색, 카드, 상세 문서를 실데이터로 렌더링한다.
 - 역할 간 임시 코드가 아니라 공용 계약 기반으로 통합돼 있다.
 
 이 문서는 구현이 진행되면서 구체화될 수 있지만, 책임 경계 자체를 흐리는 방향으로 바뀌어서는 안 된다.
