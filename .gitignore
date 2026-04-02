@@ -6,7 +6,6 @@ build/
 .venv/
 .env
 notebooks/
-*.ipynb
 .ipynb_checkpoints/
 airflow.db
 airflow.db-shm

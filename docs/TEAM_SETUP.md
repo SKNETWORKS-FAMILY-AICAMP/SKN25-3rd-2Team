@@ -85,6 +85,12 @@ cd ArXplore
 - `POSTGRES_DB=arxplore_meta`
 - `APP_POSTGRES_DB=arxplore_app`
 
+접속 관련 값은 다음 규칙으로 유지한다.
+
+- `MONGO_HOST`, `POSTGRES_HOST`에는 호스트만 넣는다.
+- 포트는 `SERVER_MONGO_PORT`, `SERVER_POSTGRES_PORT`에서 따로 관리한다.
+- 즉 `MONGO_HOST=100.106.29.101`, `SERVER_MONGO_PORT=17017`처럼 분리한다.
+
 팀원 각자 수정해야 하는 항목:
 
 | 항목 | 설명 |
@@ -173,6 +179,18 @@ bash scripts/port-forward.sh
 | Airflow | `http://127.0.0.1:18080` |
 | PostgreSQL | `127.0.0.1:15432` |
 | MongoDB | `127.0.0.1:17017` |
+
+MongoDB Compass에서는 아래 연결 문자열 형식을 권장한다.
+
+```text
+mongodb://<MONGO_INITDB_ROOT_USERNAME>:<MONGO_INITDB_ROOT_PASSWORD>@127.0.0.1:17017/?authSource=admin&directConnection=true
+```
+
+연결이 되지 않으면 먼저 다음 상태를 다시 확인한다.
+
+- WSL에서 `sudo service ssh start`가 실행 중인지
+- `bash scripts/port-forward.sh`가 종료되지 않고 유지되고 있는지
+- Compass에서 `127.0.0.1:17017`와 `authSource=admin`을 사용하고 있는지
 
 ## 10. 접속 정보 요약
 

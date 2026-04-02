@@ -226,6 +226,25 @@ docker compose -p arxplore_server -f docker-compose.server.yml up
 
 이 체크는 계약 import, 파이썬 문법, UI 실행, 주요 모듈 경로, 컨테이너 기동 상태를 빠르게 확인하는 데 사용합니다.
 
+Jupyter에서 DB 적재 상태를 직접 확인하려면 로컬 `notebooks/inspect_ingestion.ipynb`를 사용합니다. 이 노트북은 `papers`, `paper_fulltexts`, `paper_chunks`, `quality_metrics`, minimum retrieval 결과를 SQLAlchemy와 repository helper로 함께 점검할 수 있게 구성되어 있습니다.
+
+Airflow 수동 실행 시에는 다음 `dag_run.conf` 예시를 사용합니다.
+
+```json
+{"target_date": "2026-04-01"}
+```
+
+```json
+{"target_date": "2026-04-01", "max_papers": 2}
+```
+
+현재 운영 기준은 다음과 같습니다.
+
+- `arxplore_collect_papers`: 매일 `16:10 UTC` 자동 실행, HF Daily Papers 원본을 MongoDB에 저장
+- `arxplore_prepare_papers`: 파싱 품질 검증을 위해 수동 실행 유지
+
+첫 번째는 `arxplore_collect_papers`, 두 번째는 `arxplore_prepare_papers`용 예시입니다.
+
 ## 11. 저장소 구조
 
 ```text
@@ -233,6 +252,7 @@ app/                    Streamlit UI
 dags/                   Airflow DAG 정의
 docker/                 Docker 이미지와 DB 초기화 스크립트
 docs/                   계획, 구조, 역할, 규칙, 팀 환경 설정 문서
+notebooks/              Jupyter 점검/실험 노트북
 scripts/                개발/서버 실행 스크립트
 src/core/               TopicDocument, prompts, chains, rag
 src/integrations/       외부 API, 저장소, 벡터 검색 연동 계층

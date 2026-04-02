@@ -75,7 +75,12 @@ bash scripts/setup-server.sh
 
 여기서 `arxplore-airflow-init`은 1회성 초기화 컨테이너이므로 `Exited` 상태가 정상이다.
 
-현재 DAG는 구조 검증과 수동 실행을 우선하기 위해 `schedule=None`으로 등록되어 있다. 따라서 자동 주기를 기대하기보다, 우선은 DAG 등록과 수동 실행 경로가 정상인지 확인하는 것을 기준으로 삼는다.
+현재 운영 기준은 `collect`와 `prepare`를 분리해서 본다.
+
+- `arxplore_collect_papers`: 매일 `16:10 UTC`에 자동 실행되어 HF Daily Papers 원본을 MongoDB에 저장한다.
+- `arxplore_prepare_papers`: 파싱 품질이 아직 조정 중이므로 `schedule=None`으로 유지하고, 수동 실행이나 날짜 범위 배치 실행으로만 사용한다.
+
+즉, 원본 수집은 자동화하고, PostgreSQL 본문/청크 적재는 품질이 충분히 안정될 때까지 통제된 방식으로 돌리는 것이 현재 기준이다.
 
 ## 5. 구현 순서
 
@@ -210,6 +215,45 @@ trace 구분 기준은 다음과 같다.
 9. Airflow에서 각 단계가 실제로 실행 가능한지 확인한다.
 10. LangSmith trace가 남는지 확인한다.
 
+### 적재 상태 노트북 점검
+
+HF Daily Papers 수집과 PostgreSQL 적재 결과는 로컬 `notebooks/inspect_ingestion.ipynb`를 열어 확인한다.
+
+이 노트북에서는 다음을 바로 점검할 수 있다.
+
+- 최근 적재된 `papers` 목록
+- `paper_fulltexts`의 본문 길이, section 개수, `quality_metrics`
+- `paper_chunks` 개수와 chunk 미리보기
+- 특정 `arxiv_id` 기준 상세 점검
+- minimum retrieval 결과 확인
+
+### Airflow 수동 실행 기준
+
+Airflow UI에서 `Trigger DAG`를 사용할 때는 `dag_run.conf`로 파라미터를 넘긴다.
+
+`arxplore_collect_papers`
+
+```json
+{"target_date": "2026-04-01"}
+```
+
+`arxplore_prepare_papers`
+
+```json
+{"target_date": "2026-04-01", "max_papers": 2}
+```
+
+`target_date`를 비우면 오늘 날짜를 사용하고, `max_papers`를 비우면 해당 날짜 raw payload 전체를 대상으로 prepare를 수행한다.
+
+### 한 달치 임시 적재 권장 순서
+
+현재는 파싱 규칙을 더 일반화하기 위해, 먼저 최근 약 한 달치 raw payload를 MongoDB에 누적한 뒤 PostgreSQL 적재 품질을 다시 평가하는 흐름을 권장한다.
+
+1. `arxplore_collect_papers` 자동 실행으로 raw payload를 계속 누적한다.
+2. 필요한 날짜 범위를 선택해 `arxplore_prepare_papers`를 수동 실행한다.
+3. `notebooks/inspect_ingestion.ipynb`의 `quality_issues`와 chunk 출력 셀로 watchlist를 확인한다.
+4. 반복되는 오탐 패턴만 다시 파서 규칙으로 보정한다.
+
 ## 9. 자주 쓰는 명령
 
 ```bash
@@ -221,6 +265,7 @@ docker compose -p arxplore_server -f docker-compose.server.yml ps
 streamlit run app/main.py --server.address=0.0.0.0
 docker exec arxplore-airflow-web airflow dags list
 python3 -c "from src.core import TopicDocument, PaperRef, RelatedTopic"
+jupyter lab --ip=0.0.0.0 --port=18888 --no-browser --allow-root
 ```
 
 ## 10. 문제 발생 시 대응 순서

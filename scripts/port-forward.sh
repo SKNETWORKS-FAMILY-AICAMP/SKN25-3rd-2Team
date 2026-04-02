@@ -16,7 +16,6 @@ echo "  Airflow:    localhost:${AIRFLOW_PORT}"
 echo "  PostgreSQL: localhost:${POSTGRES_PORT}"
 echo "  MongoDB:    localhost:${MONGO_PORT}"
 echo ""
-echo "비밀번호 입력 후 포워딩이 유지됩니다. (Ctrl+C로 종료)"
 
 ssh -N \
   -L ${AIRFLOW_PORT}:${SERVER_IP}:${AIRFLOW_PORT} \
