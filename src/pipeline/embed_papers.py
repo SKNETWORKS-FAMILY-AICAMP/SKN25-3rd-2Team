@@ -1,4 +1,4 @@
-"""논문 청크 임베딩을 생성해 pgvector에 적재하는 파이프라인 모듈."""
+"""논문 청크 임베딩 파이프라인을 담당하는 모듈"""
 
 from __future__ import annotations
 

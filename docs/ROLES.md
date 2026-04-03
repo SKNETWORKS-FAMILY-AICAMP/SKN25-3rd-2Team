@@ -126,8 +126,8 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 **Airflow DAG 정의**
 
-- `dags/ingestion.py`
-- `dags/processing.py`
+- `dags/daily_collect.py`
+- `dags/maintenance.py`
 
 **파이프라인 진입점**
 

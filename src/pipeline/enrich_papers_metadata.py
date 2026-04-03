@@ -1,4 +1,4 @@
-"""저장된 논문의 arXiv 메타데이터를 후속 보강하는 파이프라인 모듈."""
+"""저장된 논문의 arXiv 메타데이터 보강 파이프라인을 담당하는 모듈"""
 
 from __future__ import annotations
 

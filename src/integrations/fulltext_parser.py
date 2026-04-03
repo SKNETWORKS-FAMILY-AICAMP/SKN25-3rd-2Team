@@ -1,4 +1,4 @@
-"""PDF 본문 텍스트를 파싱하고 청크 생성을 돕는 유틸리티 모듈."""
+"""PDF 본문 파싱과 청크 생성을 담당하는 모듈"""
 
 from __future__ import annotations
 

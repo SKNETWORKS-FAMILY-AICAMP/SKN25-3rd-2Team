@@ -1,4 +1,4 @@
-"""RAG 응답 체인 구현의 기본 뼈대를 담은 모듈."""
+"""RAG 응답 체인의 기본 뼈대를 담당하는 모듈"""
 
 from __future__ import annotations
 

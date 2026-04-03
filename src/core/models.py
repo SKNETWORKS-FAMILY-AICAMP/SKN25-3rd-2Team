@@ -1,9 +1,9 @@
-"""ArXplore 공용 문서 계약 모델.
+"""ArXplore 공용 문서 계약 모델을 담당하는 모듈
 
-이 파일의 모델은 UI, pipeline, 저장 계층, LLM 체인이 함께 의존하는 공용 계약입니다.
-특히 `TopicDocument`의 필드 이름, 타입, 의미는 팀 합의 없이 임의로 변경하면 안 됩니다.
+이 파일의 모델은 UI, pipeline, 저장 계층, LLM 체인이 함께 의존하는 공용 계약입니다
+특히 `TopicDocument`의 필드 이름, 타입, 의미는 팀 합의 없이 임의로 변경하면 안 됩니다
 
-변경이 필요한 경우에는 아래 항목을 함께 검토해야 합니다.
+변경이 필요한 경우에는 아래 항목을 함께 검토해야 합니다
 1. docs/AGENTS.md
 2. docs/PLAN.md
 3. docs/ARCHITECTURE.md

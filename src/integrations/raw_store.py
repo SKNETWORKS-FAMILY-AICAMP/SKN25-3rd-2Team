@@ -1,4 +1,4 @@
-"""논문 원본 응답을 저장하고 조회하는 계층 구현 모듈."""
+"""논문 원본 응답 저장과 조회를 담당하는 모듈"""
 
 from __future__ import annotations
 
@@ -10,10 +10,8 @@ from src.shared import AppSettings, get_settings, resolve_host_and_port
 
 try:
     from pymongo import MongoClient
-    from pymongo import ReturnDocument
 except ModuleNotFoundError:  # pragma: no cover - depends on runtime environment
     MongoClient = None  # type: ignore[assignment]
-    ReturnDocument = None  # type: ignore[assignment]
 
 
 class RawPaperStore:
@@ -34,7 +32,6 @@ class RawPaperStore:
         self.client = MongoClient(self._build_mongo_uri())
         self._ensure_collection_indexes()
         self._ensure_state_indexes()
-        self._ensure_prepare_queue_indexes()
 
     def save_daily_papers_response(
         self,
@@ -142,9 +139,6 @@ class RawPaperStore:
     def _state_collection(self) -> Any:
         return self.client[self.settings.mongo_db][self.settings.mongo_pipeline_state_collection]
 
-    def _prepare_queue_collection(self) -> Any:
-        return self.client[self.settings.mongo_db]["prepare_queue"]
-
     def _ensure_collection_indexes(self) -> None:
         collection = self._collection()
 
@@ -185,123 +179,6 @@ class RawPaperStore:
             [("pipeline", 1), ("name", 1)],
             unique=True,
             name="uq_pipeline_name",
-        )
-
-    def _ensure_prepare_queue_indexes(self) -> None:
-        collection = self._prepare_queue_collection()
-        collection.create_index(
-            [("mode", 1), ("date", 1)],
-            unique=True,
-            name="uq_prepare_mode_date",
-        )
-        collection.create_index(
-            [("mode", 1), ("status", 1), ("date", 1)],
-            name="idx_prepare_mode_status_date",
-        )
-
-    def enqueue_prepare_job(
-        self,
-        *,
-        date: str,
-        mode: str = "auto",
-        source: str = "collect",
-    ) -> dict[str, Any]:
-        """prepare 작업 큐에 날짜 단위 작업을 추가한다."""
-        collection = self._prepare_queue_collection()
-        now = datetime.now(timezone.utc)
-        result = collection.update_one(
-            {"mode": mode, "date": date},
-            {
-                "$setOnInsert": {
-                    "mode": mode,
-                    "date": date,
-                    "source": source,
-                    "status": "pending",
-                    "attempt_count": 0,
-                    "created_at": now,
-                },
-                "$set": {
-                    "updated_at": now,
-                },
-            },
-            upsert=True,
-        )
-        document = collection.find_one({"mode": mode, "date": date}, {"_id": 1, "mode": 1, "date": 1, "status": 1})
-        return {
-            "enqueued": bool(result.upserted_id),
-            "job_id": str(document.get("_id")) if document else None,
-            "mode": mode,
-            "date": date,
-            "status": (document or {}).get("status"),
-        }
-
-    def claim_prepare_job(
-        self,
-        *,
-        mode: str = "auto",
-        worker_id: str = "local_prepare_worker",
-    ) -> dict[str, Any] | None:
-        """대기 상태의 prepare 작업 1건을 선점해 반환한다."""
-        collection = self._prepare_queue_collection()
-        now = datetime.now(timezone.utc)
-        if ReturnDocument is None:  # pragma: no cover
-            raise ModuleNotFoundError("pymongo ReturnDocument를 사용할 수 없습니다.")
-        document = collection.find_one_and_update(
-            {"mode": mode, "status": "pending"},
-            {
-                "$set": {
-                    "status": "processing",
-                    "worker_id": worker_id,
-                    "claimed_at": now,
-                    "updated_at": now,
-                },
-                "$inc": {"attempt_count": 1},
-            },
-            sort=[("date", 1)],
-            return_document=ReturnDocument.AFTER,
-        )
-        return document
-
-    def complete_prepare_job(
-        self,
-        *,
-        mode: str,
-        date: str,
-        result: dict[str, Any] | None = None,
-    ) -> None:
-        """prepare 작업을 완료 상태로 갱신한다."""
-        collection = self._prepare_queue_collection()
-        collection.update_one(
-            {"mode": mode, "date": date},
-            {
-                "$set": {
-                    "status": "done",
-                    "result": result or {},
-                    "finished_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
-        )
-
-    def fail_prepare_job(
-        self,
-        *,
-        mode: str,
-        date: str,
-        error: str,
-    ) -> None:
-        """prepare 작업을 실패 상태로 갱신한다."""
-        collection = self._prepare_queue_collection()
-        collection.update_one(
-            {"mode": mode, "date": date},
-            {
-                "$set": {
-                    "status": "failed",
-                    "error": error,
-                    "finished_at": datetime.now(timezone.utc),
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
         )
 
     def _build_mongo_uri(self) -> str:

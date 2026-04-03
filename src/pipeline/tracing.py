@@ -1,4 +1,4 @@
-"""파이프라인 실행 단계의 LangSmith trace 구성을 생성하는 모듈."""
+"""파이프라인 실행 단계의 LangSmith trace 구성을 생성하는 모듈"""
 
 from typing import Any, Dict, Optional
 

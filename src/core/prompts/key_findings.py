@@ -1,4 +1,4 @@
-"""핵심 발견을 정리할 때 사용하는 프롬프트 모듈."""
+"""핵심 발견 정리 프롬프트를 담당하는 모듈"""
 
 from langchain_core.prompts import ChatPromptTemplate
 

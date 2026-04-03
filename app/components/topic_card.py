@@ -1,4 +1,4 @@
-"""토픽 카드 UI 렌더링을 담당하는 모듈."""
+"""토픽 카드 UI 렌더링을 담당하는 모듈"""
 
 from __future__ import annotations
 

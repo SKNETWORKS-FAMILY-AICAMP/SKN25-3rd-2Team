@@ -1,4 +1,4 @@
-"""토픽 분석 체인의 LangSmith trace 구성을 생성하는 모듈."""
+"""토픽 분석 체인의 LangSmith trace 구성을 생성하는 모듈"""
 
 from typing import Any, Dict, Optional
 

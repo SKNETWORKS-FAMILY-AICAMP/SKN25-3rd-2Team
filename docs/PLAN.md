@@ -400,7 +400,7 @@ ArXplore는 5인 병렬 개발을 전제로 한다.
 - `python3 -m compileall src app dags`
 - `streamlit run app/main.py`
 - `rg "IssueDocument|news_search|article_scraper|newspedia_" src app dags docker scripts`
-- Airflow DAG 목록에 `arxplore_collect_papers`, `arxplore_backfill_collect_papers`, `arxplore_prepare_papers`, `arxplore_enrich_papers_metadata`, `arxplore_embed_papers`, `arxplore_analyze_topics` 표시
+- Airflow DAG 목록에 `arxplore_daily_collect`, `arxplore_maintenance` 표시
 
 이 체크리스트는 코드 피봇 검증과 현재 통합 검증의 최소 기준이다.
 

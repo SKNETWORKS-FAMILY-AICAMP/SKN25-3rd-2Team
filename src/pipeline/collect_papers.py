@@ -1,10 +1,11 @@
-"""논문 원본을 수집해 저장하는 파이프라인 모듈."""
+"""논문 원본 수집 파이프라인을 담당하는 모듈"""
 
 from __future__ import annotations
 
 from datetime import date as date_cls, timedelta
 from typing import Any, Optional
 
+from src.integrations.prepare_job_repository import PrepareJobRepository
 from src.integrations.paper_search import PaperSearchClient
 from src.integrations.raw_store import RawPaperStore
 
@@ -26,11 +27,12 @@ def run_collect_papers(
 
     search_client = PaperSearchClient()
     raw_store = RawPaperStore()
+    prepare_job_repository = PrepareJobRepository()
 
     payload = search_client.fetch_daily_papers(normalized_date)
     record_id = raw_store.save_daily_papers_response(date=normalized_date, payload=payload)
     queue_result = (
-        raw_store.enqueue_prepare_job(date=normalized_date, mode="auto", source="collect")
+        prepare_job_repository.enqueue_prepare_job(target_date=normalized_date, mode="auto", source="collect")
         if enqueue_prepare
         else {"enqueued": False, "job_id": None}
     )
@@ -49,6 +51,7 @@ def run_collect_papers(
             "target_date": normalized_date,
             "fetched_count": len(payload),
             "stored_record_id": record_id,
+            "prepare_job_enqueued": bool(queue_result.get("enqueued")),
             "prepare_queue_enqueued": bool(queue_result.get("enqueued")),
         },
     )
@@ -59,6 +62,7 @@ def run_collect_papers(
         "target_date": normalized_date,
         "fetched_count": len(payload),
         "stored_record_id": record_id,
+        "prepare_job_enqueued": bool(queue_result.get("enqueued")),
         "prepare_queue_enqueued": bool(queue_result.get("enqueued")),
         "prepare_job_id": queue_result.get("job_id"),
         "sample_arxiv_ids": sample_arxiv_ids,

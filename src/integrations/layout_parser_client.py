@@ -1,4 +1,4 @@
-"""HURIDOCS PDF 레이아웃 파서 연동 클라이언트."""
+"""HURIDOCS PDF 레이아웃 파서 연동을 담당하는 모듈"""
 
 from __future__ import annotations
 

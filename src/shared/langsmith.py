@@ -1,4 +1,4 @@
-"""LangSmith 연동 여부와 trace 컨텍스트 생성을 담당하는 모듈."""
+"""LangSmith 연동 여부와 trace 컨텍스트 생성을 담당하는 모듈"""
 
 import getpass
 import os

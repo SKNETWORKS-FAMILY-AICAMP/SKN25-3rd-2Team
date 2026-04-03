@@ -1,4 +1,4 @@
-"""논문 전처리와 적재를 수행하는 파이프라인 모듈."""
+"""논문 전처리와 적재 파이프라인을 담당하는 모듈"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any, Optional
 from src.integrations.fulltext_parser import FulltextParser
 from src.integrations.paper_repository import PaperRepository
 from src.integrations.paper_search import PaperSearchClient
+from src.integrations.prepare_job_repository import PrepareJobRepository
 from src.integrations.raw_store import RawPaperStore
 from .tracing import build_pipeline_trace_config
 
@@ -650,14 +651,14 @@ def run_consume_prepare_queue(
     allowed_categories: set[str] | None = None,
 ) -> dict[str, Any]:
     """prepare 큐를 소비해 날짜별 파싱/청킹 적재를 수행한다."""
-    raw_store = RawPaperStore()
+    prepare_job_repository = PrepareJobRepository()
     normalized_max_jobs = max(1, int(max_jobs_per_run or 1))
     successes: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
     claimed_dates: list[str] = []
 
     for _ in range(normalized_max_jobs):
-        job = raw_store.claim_prepare_job(mode=mode, worker_id=worker_id)
+        job = prepare_job_repository.claim_prepare_job(mode=mode, worker_id=worker_id)
         if not job:
             break
 
@@ -673,9 +674,9 @@ def run_consume_prepare_queue(
                 max_papers=max_papers,
                 allowed_categories=allowed_categories,
             )
-            raw_store.complete_prepare_job(
+            prepare_job_repository.complete_prepare_job(
                 mode=mode,
-                date=target_date,
+                target_date=target_date,
                 result={
                     "saved_papers": int(result.get("saved_papers", 0) or 0),
                     "saved_fulltexts": int(result.get("saved_fulltexts", 0) or 0),
@@ -686,7 +687,7 @@ def run_consume_prepare_queue(
                 },
             )
         except Exception as exc:
-            raw_store.fail_prepare_job(mode=mode, date=target_date, error=str(exc))
+            prepare_job_repository.fail_prepare_job(mode=mode, target_date=target_date, error=str(exc))
             failures.append({"date": target_date, "error": str(exc)})
             continue
 

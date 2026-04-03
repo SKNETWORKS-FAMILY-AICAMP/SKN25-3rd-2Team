@@ -1,4 +1,4 @@
-"""논문 chunk와 문맥을 조회하는 retrieval 구현."""
+"""논문 chunk와 문맥 조회를 담당하는 모듈"""
 
 from __future__ import annotations
 

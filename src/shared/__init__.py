@@ -1,4 +1,4 @@
-"""공용 설정과 추적 유틸리티의 공개 인터페이스를 노출하는 모듈."""
+"""공용 설정과 추적 유틸리티의 공개 인터페이스를 노출하는 모듈"""
 
 from .langsmith import (
     LangSmithTraceContext,

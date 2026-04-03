@@ -165,10 +165,16 @@ docker logs -f arxplore-layout-parser
 로컬 GPU에서 prepare를 실행할 때는 아래 워커 스크립트를 사용한다.
 
 ```bash
-docker compose -p arxplore_dev -f docker-compose.dev.yml exec dev bash -lc 'cd /workspace && python3 -m src.pipeline.prepare_worker --mode auto --max-jobs-per-run 1 --embed-max-chunks 200 --loop --sleep-seconds 120'
+bash scripts/prepare-worker.sh
 ```
 
-`auto` 모드는 `collect`가 enqueue한 날짜를 소비해 prepare를 수행하고, 성공한 `arxiv_id`에 대해 임베딩까지 이어서 실행한다. 임베딩을 잠시 끄려면 `--skip-embed`를 추가한다.
+`auto` 모드는 `collect`가 PostgreSQL job queue에 넣은 날짜를 소비해 prepare를 수행하고, 성공한 `arxiv_id`에 대해 임베딩까지 이어서 실행한다. loop 모드에서는 `LISTEN/NOTIFY`로 새 작업을 기다리며, 임베딩을 잠시 끄려면 `--skip-embed`를 추가한다.
+
+1회만 실행하려면 다음 명령을 사용한다.
+
+```bash
+bash scripts/prepare-worker.sh once
+```
 
 과거 raw를 파싱해 적재할 때만 backfill 모드를 수동으로 사용한다.
 

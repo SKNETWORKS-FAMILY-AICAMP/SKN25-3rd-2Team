@@ -1,4 +1,4 @@
-"""로컬 GPU 환경에서 prepare 자동추적/백필과 후속 임베딩을 실행하는 워커 모듈."""
+"""로컬 GPU 환경의 prepare 자동추적, 백필, 후속 임베딩을 담당하는 워커 모듈"""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import time
 from typing import Any
 
+from src.integrations.prepare_job_repository import PrepareJobRepository
 from src.pipeline import run_backfill_prepare_papers, run_consume_prepare_queue, run_embed_papers
 
 
@@ -202,9 +203,16 @@ def main() -> int:
         "--sleep-seconds",
         type=float,
         default=60.0,
-        help="loop 실행 시 run 사이 대기 시간(초). 기본값은 60초다.",
+        help="backfill loop 실행 시 run 사이 대기 시간(초). 기본값은 60초다.",
+    )
+    parser.add_argument(
+        "--wait-timeout-seconds",
+        type=float,
+        default=120.0,
+        help="auto loop 실행 시 새 작업 알림을 기다릴 최대 시간(초). 기본값은 120초다.",
     )
     args = parser.parse_args()
+    prepare_job_repository = PrepareJobRepository()
 
     while True:
         result = _run_once(args)
@@ -214,6 +222,15 @@ def main() -> int:
             return 0 if result.get("status") != "failed" else 1
 
         status = str(result.get("status") or "")
+        if args.mode == "auto":
+            if status == "no_op":
+                prepare_job_repository.wait_for_prepare_job(timeout_seconds=float(args.wait_timeout_seconds))
+                continue
+            if status == "failed":
+                prepare_job_repository.wait_for_prepare_job(timeout_seconds=min(float(args.wait_timeout_seconds), 30.0))
+                continue
+            continue
+
         if status in {"completed", "no_op"}:
             return 0
         if status == "failed":
