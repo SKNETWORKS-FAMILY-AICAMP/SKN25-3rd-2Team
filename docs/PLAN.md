@@ -104,15 +104,21 @@ ArXplore는 다음 세 층의 소스를 구분한다.
 
 ## 6. 현재 우선 범위
 
-### 현재 범위에서 반드시 구현하는 것
+### 현재 단계에서 이미 반영된 것
 
-- HF Daily Papers 수집
-- arXiv 메타데이터 보강
+- HF Daily Papers 수집 경로
+- HF Daily Papers 과거 raw 백필 경로
+- arXiv 메타데이터 후속 보강 경로
 - MongoDB 원본 저장
-- PostgreSQL `papers` 저장
-- PDF 본문 텍스트 파싱
-- 최종 청크 분할
-- 최소 retrieval 경로
+- PostgreSQL `papers`, `paper_fulltexts`, `paper_chunks` 적재
+- HURIDOCS + `pypdf` fallback 기반 PDF 본문 텍스트 파싱
+- 최종 청크 분할과 품질 메트릭 계산
+- `paper_fulltexts.artifacts`, `parser_metadata` 저장
+- 로컬 parser 컨테이너와 로컬 `prepare_papers` 실행 경로
+
+### 현재 범위에서 이어서 구현할 것
+
+- 최소 retrieval 경로 고도화
 - 임베딩 생성 및 벡터 검색
 - 토픽 그룹핑
 - `TopicDocument` 생성
@@ -131,18 +137,19 @@ ArXplore는 다음 세 층의 소스를 구분한다.
 
 ## 7. 현재 저장소 상태
 
-현재 저장소는 구현 0%에 가까운 스캐폴드를 유지하면서, 다음을 ArXplore 기준으로 바꾼 상태다.
+현재 저장소는 도메인 전환만 끝낸 스캐폴드 상태를 이미 넘어서 있으며, 다음이 ArXplore 기준으로 실제 구현되어 있다.
 
 - 코어 모델: `TopicDocument`, `PaperRef`, `RelatedTopic`
 - 프롬프트: 논문 토픽 요약 기준으로 재정의
 - 체인: `analyze_topic()` 중심 구조
 - 통합 계층: `paper_search`, `paper_repository`, `topic_repository`
-- 파이프라인: `collect_papers`, `prepare_papers`, `embed_papers`, `analyze_topics`
-- Airflow DAG: `arxplore_*` 네이밍
+- PDF 파싱: `fulltext_parser`, `layout_parser_client`
+- 파이프라인: `collect_papers`, `backfill_collect_papers`, `prepare_papers`, `enrich_papers_metadata`, `embed_papers`, `analyze_topics`
+- Airflow DAG: `arxplore_*` 네이밍과 raw backfill DAG
 - UI: 토픽 카드, 토픽 상세, ArXplore 데모 데이터
 - Docker / Compose / scripts / docs: ArXplore 기준 명칭과 구조로 전환
 
-즉, 현재 단계는 "도메인과 계약을 완전히 전환한 스캐폴드"다. 이후 구현은 이 구조 위에 실제 로직을 채워 넣는 방식으로 진행한다.
+즉, 현재 단계는 "수집과 전처리 파이프라인은 실제로 동작하고, 그 위에 검색·생성 계층을 이어 붙이는 단계"라고 보는 것이 정확하다.
 
 ## 8. 핵심 사용자 경험
 
@@ -236,7 +243,7 @@ PostgreSQL과 pgvector는 정제된 논문과 검색 데이터를 저장한다. 
 이 구조를 택한 이유는 다음과 같다.
 
 - `papers`는 논문 메타데이터의 기준 테이블이다.
-- `paper_fulltexts`는 PDF에서 추출한 본문 텍스트와 섹션 정보를 저장하는 기준 테이블이다.
+- `paper_fulltexts`는 PDF에서 추출한 본문 텍스트와 섹션 정보에 더해 `quality_metrics`, `artifacts`, `parser_metadata`를 저장하는 기준 테이블이다.
 - `paper_chunks`와 `paper_embeddings`는 RAG 검색의 핵심 데이터다.
 - `topics`와 `topic_documents`는 카드와 상세 문서의 핵심 데이터다.
 - 토픽 문서는 JSONB로 저장해 공용 계약과 UI 렌더링을 단순하게 유지한다.
@@ -245,7 +252,7 @@ PostgreSQL과 pgvector는 정제된 논문과 검색 데이터를 저장한다. 
 
 ## 11. 배치 파이프라인
 
-전체 흐름은 4개의 Airflow DAG를 기준으로 설계한다.
+전체 흐름은 6개의 Airflow DAG를 기준으로 설계한다.
 
 ### `collect_papers`
 
@@ -253,11 +260,25 @@ PostgreSQL과 pgvector는 정제된 논문과 검색 데이터를 저장한다. 
 - 원본 payload MongoDB 저장
 - 수집 상태 기록
 
+### `backfill_collect_papers`
+
+- 과거 HF Daily Papers 날짜 feed를 하루 최대 30일씩 순차 수집
+- 이미 MongoDB에 저장된 날짜는 skip
+- MongoDB pipeline state에 cursor를 저장해 다음 run에서 이어받기
+- 목표 시점에 도달하면 no-op 상태로 종료
+
+### `enrich_papers_metadata`
+
+- PostgreSQL에 먼저 저장된 논문 중 `primary_category`, `categories`가 비어 있는 항목을 대상으로 arXiv 메타데이터를 후속 보강
+- `pdf_url`, `published_at`, `primary_category`, `categories`를 canonical 값으로 갱신
+- 원본 수집/파싱과 분리해 서버에서 느리게 돌리는 보조 DAG
+
 ### `prepare_papers`
 
 - HF 응답에서 arXiv ID 추출
 - arXiv API 보강
-- PDF 본문 텍스트 파싱
+- HURIDOCS + `pypdf` fallback 기반 PDF 본문 텍스트 파싱
+- `artifacts`, `parser_metadata`, `quality_metrics` 생성
 - AI 카테고리 필터링
 - 중복 제거
 - PostgreSQL `papers`, `paper_fulltexts`, `paper_chunks` upsert
@@ -275,7 +296,7 @@ PostgreSQL과 pgvector는 정제된 논문과 검색 데이터를 저장한다. 
 - 핵심 발견 생성
 - `TopicDocument` 저장
 
-현재 저장소에서는 이 네 DAG와 `src/pipeline` 진입점이 이미 존재한다. 다만 각 단계의 세부 비즈니스 로직은 아직 스캐폴드 수준이며, 우선은 수동 실행 검증을 위해 `schedule=None`으로 유지한다.
+현재 저장소에서는 이 여섯 DAG와 `src/pipeline` 진입점이 이미 존재한다. 이 중 `collect_papers`, `backfill_collect_papers`, `prepare_papers`, `enrich_papers_metadata`는 실제 수집/보강/파싱/적재 경로에 연결돼 있으며, `embed_papers`와 `analyze_topics`는 아직 스캐폴드 중심으로 남아 있다. `prepare_papers`는 parser runtime을 통제하기 위해 현재 기준으로는 수동 실행을 유지한다.
 
 ## 12. RAG 질의응답 구조
 
@@ -374,11 +395,12 @@ ArXplore는 5인 병렬 개발을 전제로 한다.
 
 - `docker compose -p arxplore_dev up`
 - `docker compose -p arxplore_server -f docker-compose.server.yml up`
+- `docker compose -f docker-compose.parser.yml up -d --build`
 - `python3 -c "from src.core import TopicDocument, PaperRef, RelatedTopic"`
 - `python3 -m compileall src app dags`
 - `streamlit run app/main.py`
 - `rg "IssueDocument|news_search|article_scraper|newspedia_" src app dags docker scripts`
-- Airflow DAG 목록에 `arxplore_collect_papers`, `arxplore_prepare_papers`, `arxplore_embed_papers`, `arxplore_analyze_topics` 표시
+- Airflow DAG 목록에 `arxplore_collect_papers`, `arxplore_backfill_collect_papers`, `arxplore_prepare_papers`, `arxplore_enrich_papers_metadata`, `arxplore_embed_papers`, `arxplore_analyze_topics` 표시
 
 이 체크리스트는 코드 피봇 검증과 현재 통합 검증의 최소 기준이다.
 
@@ -388,7 +410,7 @@ ArXplore는 5인 병렬 개발을 전제로 한다.
 
 - 완전한 학술 검증 시스템
 - 모든 분야 논문 지원
-- 표, 그림, 캡션, 수식 구조화 중심의 정밀 분석
+- 표, 그림, 캡션, 수식의 완전한 semantic enrichment
 - citation count 실시간 추적
 - 고급 랭킹과 추천 시스템
 - 복잡한 문서 버전 비교

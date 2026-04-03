@@ -4,7 +4,7 @@
 
 이 문서는 ArXplore 프로젝트 구성원이 개발 환경을 처음 준비할 때 따라야 하는 절차를 정리한 문서이다.
 
-서버 스택(MongoDB, PostgreSQL, Airflow)은 팀 공용 서버에서 운영되고 있으며, 각 팀원은 자신의 컴퓨터에서 `dev` 컨테이너만 띄워 작업한다. 서버 접속은 Tailscale VPN을 통해 이루어진다.
+서버 스택(MongoDB, PostgreSQL, Airflow)은 팀 공용 서버에서 운영되고 있으며, 각 팀원은 자신의 컴퓨터에서 `dev` 컨테이너를 기본으로 사용한다. PDF 파싱 품질 검증과 `prepare_papers` 로컬 실행이 필요할 때는 여기에 parser 컨테이너를 추가로 띄운다. 서버 접속은 Tailscale VPN을 통해 이루어진다.
 
 ## 2. 전체 흐름
 
@@ -15,6 +15,7 @@
 4. .env 설정
 5. dev 컨테이너 실행
 6. (선택) Windows 브라우저에서 Airflow/DB 접근 시 포트 포워딩
+7. (선택) 로컬 parser 컨테이너 실행
 ```
 
 ## 3. 준비 사항
@@ -137,7 +138,25 @@ streamlit run app/main.py --server.address=0.0.0.0
 
 브라우저: `http://127.0.0.1:18501`
 
-## 8. 서버 스택 실행
+## 8. 로컬 parser 컨테이너 실행
+
+PDF 파싱 품질 검증과 `prepare_papers` 로컬 실행은 HURIDOCS 기반 parser 컨테이너를 함께 사용하는 것을 기준으로 한다.
+
+```bash
+docker compose -f docker-compose.parser.yml up -d --build
+docker logs -f arxplore-layout-parser
+```
+
+정상 실행 후 parser는 `5060` 포트에서 응답한다. 개발 컨테이너 안에서 사용할 때는 `LAYOUT_PARSER_BASE_URL`을 이 주소로 맞춘다. 로컬 Docker 브리지 환경에서는 보통 `http://172.17.0.1:5060`을 사용한다.
+
+기본 원칙은 다음과 같다.
+
+- parser 컨테이너는 공용 서버 스택이 아니라 로컬 개발용 PC에서 실행한다.
+- 서버는 MongoDB, PostgreSQL, Airflow 중심으로 유지한다.
+- parser는 가능하면 GPU를 사용하고, GPU가 없으면 CPU로 fallback한다.
+- parser가 없어도 `pypdf` fallback 경로는 동작하지만 품질 검증은 parser를 켠 상태를 기준으로 수행한다.
+
+## 9. 서버 스택 실행
 
 인프라, Airflow, DB, 통합 테스트 담당자는 아래 명령으로 서버 스택을 올릴 수 있다.
 
@@ -155,7 +174,7 @@ docker compose -p arxplore_server -f docker-compose.server.yml ps
 - `arxplore-airflow-scheduler`
 - `arxplore-airflow-dag-processor`
 
-## 9. Windows 브라우저에서 서버 접근
+## 10. Windows 브라우저에서 서버 접근
 
 WSL에만 Tailscale이 설치되어 있으므로, Windows 브라우저에서 Airflow 웹 UI 등을 보려면 포트 포워딩이 필요하다.
 
@@ -192,7 +211,7 @@ mongodb://<MONGO_INITDB_ROOT_USERNAME>:<MONGO_INITDB_ROOT_PASSWORD>@127.0.0.1:17
 - `bash scripts/port-forward.sh`가 종료되지 않고 유지되고 있는지
 - Compass에서 `127.0.0.1:17017`와 `authSource=admin`을 사용하고 있는지
 
-## 10. 접속 정보 요약
+## 11. 접속 정보 요약
 
 ### dev 컨테이너 / 코드에서
 
@@ -201,6 +220,7 @@ mongodb://<MONGO_INITDB_ROOT_USERNAME>:<MONGO_INITDB_ROOT_PASSWORD>@127.0.0.1:17
 | PostgreSQL | `100.106.29.101:15432` |
 | MongoDB | `100.106.29.101:17017` |
 | Airflow API | `http://100.106.29.101:18080` |
+| Layout Parser | `http://172.17.0.1:5060` 또는 로컬 parser 주소 |
 
 ### Windows 브라우저 / DB 클라이언트에서
 
@@ -210,7 +230,7 @@ mongodb://<MONGO_INITDB_ROOT_USERNAME>:<MONGO_INITDB_ROOT_PASSWORD>@127.0.0.1:17
 | PostgreSQL | `127.0.0.1:15432` |
 | MongoDB | `127.0.0.1:17017` |
 
-## 11. LangSmith 설정
+## 12. LangSmith 설정
 
 LangSmith는 별도 컨테이너 없이 Python 실행 환경에서 사용한다. 공용 API 키는 `.env`에 이미 설정되어 있으므로, 각자 `LANGSMITH_TRACE_USER`에 본인 이름만 넣으면 된다.
 

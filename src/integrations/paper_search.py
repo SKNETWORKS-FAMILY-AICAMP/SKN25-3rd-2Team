@@ -1,4 +1,4 @@
-"""논문 검색 API 연동 구현."""
+"""논문 검색 API와 연동하는 구현 모듈."""
 
 from __future__ import annotations
 
@@ -60,12 +60,13 @@ class PaperSearchClient:
         for index in range(0, len(unique_ids), batch_size):
             batch = unique_ids[index : index + batch_size]
             params = {"id_list": ",".join(batch)}
-            response = self.session.get(
+            response = self._get_with_retries(
                 self.settings.arxiv_api_base_url,
                 params=params,
                 timeout=self.settings.arxiv_request_timeout_seconds,
+                retry_count=3,
+                retry_delay_seconds=max(1.0, float(self.settings.arxiv_request_delay_seconds)),
             )
-            response.raise_for_status()
             results.update(self._parse_arxiv_feed(response.text))
 
             has_more = index + batch_size < len(unique_ids)
@@ -73,6 +74,36 @@ class PaperSearchClient:
                 time.sleep(self.settings.arxiv_request_delay_seconds)
 
         return results
+
+    def _get_with_retries(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        timeout: int,
+        retry_count: int,
+        retry_delay_seconds: float,
+    ) -> requests.Response:
+        last_error: requests.RequestException | None = None
+        for attempt in range(1, retry_count + 1):
+            try:
+                response = self.session.get(
+                    url,
+                    params=params,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                return response
+            except requests.RequestException as exc:
+                last_error = exc
+                if attempt >= retry_count:
+                    break
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                multiplier = 5 if status_code == 429 else 1
+                time.sleep(retry_delay_seconds * attempt * multiplier)
+        if last_error is None:
+            raise RuntimeError("HTTP 요청 재시도 중 알 수 없는 오류가 발생했습니다.")
+        raise last_error
 
     @staticmethod
     def _validate_date(value: str) -> str:

@@ -1,4 +1,4 @@
-"""논문 전처리 DAG."""
+"""논문 전처리와 적재를 오케스트레이션하는 DAG 정의."""
 
 from __future__ import annotations
 

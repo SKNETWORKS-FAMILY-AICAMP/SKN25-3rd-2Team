@@ -113,18 +113,23 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 - `docker-compose.yml`
 - `docker-compose.server.yml`
+- `docker-compose.parser.yml`
 - `docker/airflow/Dockerfile`
 - `docker/dev/Dockerfile`
+- `docker/parser/Dockerfile`
 - `docker/mongo/Dockerfile`
 - `docker/postgres/Dockerfile`
 - `docker/postgres/init/01-create-app-db.sh`
 - `scripts/setup-dev.sh`
 - `scripts/setup-server.sh`
 - `scripts/port-forward.sh`
+- `scripts/reset_refined_postgres.py`
 
 **Airflow DAG 정의**
 
 - `dags/collect_papers.py`
+- `dags/backfill_collect_papers.py`
+- `dags/enrich_papers_metadata.py`
 - `dags/prepare_papers.py`
 - `dags/embed_papers.py`
 - `dags/analyze_topics.py`
@@ -133,6 +138,7 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 - `src/pipeline/__init__.py`
 - `src/pipeline/collect_papers.py`
+- `src/pipeline/enrich_papers_metadata.py`
 - `src/pipeline/prepare_papers.py`
 - `src/pipeline/embed_papers.py`
 - `src/pipeline/analyze_topics.py`
@@ -144,10 +150,8 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 - `src/integrations/raw_store.py`
 - `src/integrations/paper_repository.py`
 - `src/integrations/topic_repository.py`
-
-필요 시 다음 파일을 신규 생성할 수 있다.
-
 - `src/integrations/fulltext_parser.py`
+- `src/integrations/layout_parser_client.py`
 - `src/integrations/minimum_retriever.py`
 
 **공용 설정**
@@ -169,6 +173,14 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 - `PaperSearchClient.fetch_daily_papers(date)`를 구현한다.
 - 응답이 `list` 형태라는 점을 반영해 처리한다.
 - `RawPaperStore.save_daily_papers_response(date, payload)`로 MongoDB에 원본을 저장한다.
+- 과거 원본을 장기적으로 채우기 위해 cursor 기반 `backfill_collect_papers` 경로를 운영한다.
+- backfill은 하루 최대 30일 단위로 진행하고, 이미 저장된 날짜는 skip하며, MongoDB pipeline state에 진행 상태를 남긴다.
+
+**arXiv 메타데이터 후속 보강**
+
+- `prepare_papers`는 HF raw 기반 최소 메타데이터만으로도 적재를 진행할 수 있어야 한다.
+- `enrich_papers_metadata`는 PostgreSQL에 저장된 논문 중 `primary_category`, `categories`, canonical `pdf_url` 등이 비어 있는 항목을 대상으로 arXiv 메타데이터를 후속 보강한다.
+- 이 단계는 서버에서 천천히 돌아가는 보조 워크플로우로 운영한다.
 
 **arXiv 메타데이터 보강**
 
@@ -178,15 +190,17 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 
 **PDF 본문 텍스트 파싱**
 
+- HURIDOCS 레이아웃 파서를 우선 사용하고, 실패 시 `pypdf` fallback으로 본문을 추출한다.
 - PDF에서 본문 텍스트와 섹션 정보를 추출한다.
-- 표, 그림, 캡션, 수식 구조화는 현재 범위에 포함하지 않는다.
-- 추출 결과는 `paper_fulltexts` 또는 동등한 구조로 저장할 수 있도록 정리한다.
+- 표, 그림, 캡션은 semantic enrichment까지는 하지 않지만, `artifacts` 메타데이터로 함께 저장한다.
+- 추출 결과는 `paper_fulltexts`에 `text`, `sections`, `quality_metrics`, `artifacts`, `parser_metadata` 형태로 저장할 수 있도록 정리한다.
 
 **PostgreSQL 적재와 최종 청크 생성**
 
 - 논문 메타데이터, 본문 텍스트, 최종 청크를 PostgreSQL에 적재한다.
 - 이 역할이 쓰기 경로를 책임진다.
 - 청크 전략은 이 단계에서 확정한다. 2번은 청크를 새로 자르는 역할이 아니라, 이미 저장된 청크를 기반으로 임베딩과 검색을 고도화하는 역할이다.
+- 파싱 기준이 크게 바뀌면 MongoDB raw를 유지한 채 PostgreSQL 정제층을 초기화하고 다시 적재하는 운영 경로도 이 역할이 관리한다.
 
 **최소 retrieval 제공**
 
@@ -203,10 +217,13 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 #### 다른 역할에 제공해야 할 것
 
 - 날짜 기준 원본 feed 수집 함수
+- 과거 날짜 raw 백필 함수와 cursor 상태 저장 경로
+- 저장된 논문에 대한 arXiv 메타데이터 후속 보강 함수
 - arXiv 메타데이터 보강 함수
 - MongoDB 저장 함수
 - PostgreSQL 적재 결과
 - 최종 청크가 적재된 데이터셋
+- parser runtime 구성과 로컬 실행 경로
 - 최소 retrieval 인터페이스
 - `run_collect_papers()`, `run_prepare_papers()`, `run_embed_papers()`, `run_analyze_topics()` 진입점
 - 통합 테스트에 사용할 최소 실데이터
@@ -214,10 +231,11 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 #### 완료 기준
 
 - `setup-dev.sh`, `setup-server.sh`가 실패 없이 실행된다.
+- `docker-compose.parser.yml`로 로컬 parser를 실행할 수 있다.
 - Airflow UI에서 `arxplore_*` 4개 DAG가 확인된다.
 - 특정 날짜 기준 HF Daily Papers를 MongoDB에 저장할 수 있다.
 - arXiv 보강과 PDF 본문 텍스트 파싱이 된다.
-- PostgreSQL에 메타데이터, 본문 텍스트, 청크가 적재된다.
+- PostgreSQL에 메타데이터, 본문 텍스트, 청크가 적재되고 `artifacts`, `parser_metadata`가 함께 저장된다.
 - 최소 retrieval이 동작한다.
 - 2~5번 역할이 같은 데이터셋 위에서 바로 시작할 수 있다.
 
@@ -433,6 +451,7 @@ ArXplore에서는 다음 용어를 공통으로 사용한다.
 - 샘플 HF Daily Papers 원본 payload
 - arXiv 보강 후 paper dict 예시
 - PDF 본문 텍스트 예시
+- `artifacts`와 `parser_metadata` 예시
 - 최종 청크 예시
 - 최소 retrieval 입력/출력 예시
 - `.env` 기준 환경 변수 설명

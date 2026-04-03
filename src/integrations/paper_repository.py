@@ -1,4 +1,4 @@
-"""정제 논문 저장 및 조회 계층 구현."""
+"""정제된 논문 데이터를 저장하고 조회하는 계층 구현 모듈."""
 
 from __future__ import annotations
 
@@ -82,22 +82,36 @@ class PaperRepository:
         sections: list[dict[str, Any]] | None = None,
         source: str = "pdf",
         quality_metrics: dict[str, Any] | None = None,
+        artifacts: dict[str, Any] | None = None,
+        parser_metadata: dict[str, Any] | None = None,
     ) -> None:
         """논문 본문 텍스트를 저장한다."""
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO paper_fulltexts (arxiv_id, text, sections, source, quality_metrics, updated_at)
-                VALUES (%s, %s, %s, %s, %s, NOW())
+                INSERT INTO paper_fulltexts (
+                    arxiv_id, text, sections, source, quality_metrics, artifacts, parser_metadata, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (arxiv_id)
                 DO UPDATE SET
                     text = EXCLUDED.text,
                     sections = EXCLUDED.sections,
                     source = EXCLUDED.source,
                     quality_metrics = EXCLUDED.quality_metrics,
+                    artifacts = EXCLUDED.artifacts,
+                    parser_metadata = EXCLUDED.parser_metadata,
                     updated_at = NOW()
                 """,
-                (arxiv_id, text, Json(sections or []), source, Json(quality_metrics or {})),
+                (
+                    arxiv_id,
+                    text,
+                    Json(sections or []),
+                    source,
+                    Json(quality_metrics or {}),
+                    Json(artifacts or {}),
+                    Json(parser_metadata or {}),
+                ),
             )
 
     def save_paper_chunks(self, arxiv_id: str, chunks: list[dict[str, Any]]) -> None:
@@ -159,6 +173,45 @@ class PaperRepository:
             )
         return papers
 
+    def list_papers_missing_arxiv_metadata(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        """arXiv 보강이 아직 충분히 적용되지 않은 논문 목록을 조회한다."""
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT arxiv_id, title, authors, abstract, primary_category, categories, pdf_url,
+                       published_at, updated_at, upvotes, github_url, github_stars, citation_count, source
+                FROM papers
+                WHERE
+                    primary_category IS NULL
+                    OR categories = '[]'::jsonb
+                    OR source = 'hf_daily_papers_raw'
+                ORDER BY COALESCE(published_at, updated_at_utc) DESC
+                LIMIT %s
+                """,
+                (max(1, limit),),
+            )
+            rows = cursor.fetchall()
+
+        return [
+            {
+                "arxiv_id": row[0],
+                "title": row[1],
+                "authors": row[2] or [],
+                "abstract": row[3] or "",
+                "primary_category": row[4],
+                "categories": row[5] or [],
+                "pdf_url": row[6],
+                "published_at": row[7].isoformat() if row[7] else None,
+                "updated_at": row[8].isoformat() if row[8] else None,
+                "upvotes": row[9] or 0,
+                "github_url": row[10],
+                "github_stars": row[11],
+                "citation_count": row[12],
+                "source": row[13] or "hf_daily_papers",
+            }
+            for row in rows
+        ]
+
     def get_paper(self, arxiv_id: str) -> dict[str, Any] | None:
         """단일 논문 메타데이터를 조회한다."""
         with self._connection() as connection, connection.cursor() as cursor:
@@ -197,7 +250,7 @@ class PaperRepository:
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT arxiv_id, text, sections, source, quality_metrics, updated_at
+                SELECT arxiv_id, text, sections, source, quality_metrics, artifacts, parser_metadata, updated_at
                 FROM paper_fulltexts
                 WHERE arxiv_id = %s
                 """,
@@ -214,7 +267,9 @@ class PaperRepository:
             "sections": row[2] or [],
             "source": row[3],
             "quality_metrics": row[4] or {},
-            "updated_at": row[5].isoformat() if row[5] else None,
+            "artifacts": row[5] or {},
+            "parser_metadata": row[6] or {},
+            "updated_at": row[7].isoformat() if row[7] else None,
         }
 
     def list_paper_chunks(self, arxiv_id: str, *, limit: int | None = None) -> list[dict[str, Any]]:
@@ -454,6 +509,8 @@ class PaperRepository:
                     sections JSONB NOT NULL DEFAULT '[]'::jsonb,
                     source TEXT NOT NULL DEFAULT 'pdf',
                     quality_metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    artifacts JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    parser_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 """
@@ -462,6 +519,18 @@ class PaperRepository:
                 """
                 ALTER TABLE paper_fulltexts
                 ADD COLUMN IF NOT EXISTS quality_metrics JSONB NOT NULL DEFAULT '{}'::jsonb;
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE paper_fulltexts
+                ADD COLUMN IF NOT EXISTS artifacts JSONB NOT NULL DEFAULT '{}'::jsonb;
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE paper_fulltexts
+                ADD COLUMN IF NOT EXISTS parser_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
                 """
             )
             cursor.execute(

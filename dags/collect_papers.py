@@ -1,4 +1,4 @@
-"""논문 수집 DAG."""
+"""논문 원본 수집을 오케스트레이션하는 DAG 정의."""
 
 from __future__ import annotations
 

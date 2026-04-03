@@ -1,4 +1,4 @@
-"""토픽 개요 생성 프롬프트."""
+"""토픽 개요를 생성할 때 사용하는 프롬프트 모듈."""
 
 from langchain_core.prompts import ChatPromptTemplate
 

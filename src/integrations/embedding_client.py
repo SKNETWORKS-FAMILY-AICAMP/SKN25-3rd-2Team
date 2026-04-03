@@ -1,4 +1,4 @@
-"""임베딩 생성 계층 뼈대."""
+"""임베딩 생성 계층의 기본 뼈대를 담은 모듈."""
 
 from __future__ import annotations
 

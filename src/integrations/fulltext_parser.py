@@ -1,13 +1,16 @@
-"""PDF 본문 텍스트 파싱 유틸리티."""
+"""PDF 본문 텍스트를 파싱하고 청크 생성을 돕는 유틸리티 모듈."""
 
 from __future__ import annotations
 
 import io
 import re
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from typing import Any
 
 import requests
+
+from .layout_parser_client import LayoutParserClient
 
 try:
     from pypdf import PdfReader
@@ -23,6 +26,8 @@ class FulltextParseResult:
     sections: list[dict[str, Any]]
     source: str
     quality_metrics: dict[str, Any]
+    artifacts: dict[str, Any] = field(default_factory=dict)
+    parser_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class FulltextParser:
@@ -65,46 +70,60 @@ class FulltextParser:
         "acknowledgements",
         "acknowledgments",
     }
+    _KNOWN_UPPERCASE_TITLE_TOKENS = {
+        "AI",
+        "API",
+        "ASR",
+        "BERT",
+        "BLEU",
+        "BPE",
+        "CNN",
+        "CPU",
+        "CTC",
+        "GAN",
+        "GPU",
+        "GRU",
+        "GPT",
+        "LIDAR",
+        "LLM",
+        "LSTM",
+        "MLP",
+        "NLP",
+        "NMT",
+        "OCR",
+        "PDF",
+        "RAG",
+        "RNN",
+        "SOTA",
+        "TTS",
+        "VLM",
+    }
     _NUMBERED_SECTION_PATTERN = re.compile(
-        r"^(?P<prefix>\d+(?:\.\d+)*)(?:[.)])?\s+(?P<title>[A-Z][A-Za-z0-9 ,:/()'&-]{1,100})$"
+        r"^(?P<prefix>(?:\d+(?:\.\d+)*|[A-Z](?:\.\d+)*))(?:[.)])?\s+(?P<title>[A-Z][A-Za-z0-9 ,:/()'&\-\u2013]{1,100})$"
     )
+    _LAYOUT_TEXT_TYPES = {"Title", "Section header", "Text", "Table", "Caption", "Formula", "List item", "Footnote"}
+    _LAYOUT_IGNORED_TYPES = {"Page header", "Page footer"}
+    _LAYOUT_ARTIFACT_TYPES = {"Table", "Picture", "Caption"}
 
-    def __init__(self, *, timeout_seconds: int = 30) -> None:
+    def __init__(self, *, timeout_seconds: int = 30, layout_parser_client: LayoutParserClient | None = None) -> None:
         self.timeout_seconds = timeout_seconds
+        self.layout_parser_client = layout_parser_client
 
     def parse_from_pdf_url(self, pdf_url: str, *, fallback_text: str = "") -> FulltextParseResult:
         """PDF를 다운로드해 텍스트를 추출한다. 실패 시 fallback 텍스트를 사용한다."""
         normalized_url = (pdf_url or "").strip()
         if not normalized_url:
-            cleaned = self._normalize_text(fallback_text)
-            sections = [{"title": "Abstract", "text": cleaned}] if cleaned else []
-            return FulltextParseResult(
-                text=cleaned,
-                sections=sections,
-                source="fallback_abstract",
-                quality_metrics=self._build_fulltext_quality_metrics(
-                    text=cleaned,
-                    sections=sections,
-                    source="fallback_abstract",
-                ),
-            )
+            return self._build_fallback_result(fallback_text)
 
         try:
             response = requests.get(normalized_url, timeout=self.timeout_seconds)
             response.raise_for_status()
         except requests.RequestException:
-            cleaned = self._normalize_text(fallback_text)
-            sections = [{"title": "Abstract", "text": cleaned}] if cleaned else []
-            return FulltextParseResult(
-                text=cleaned,
-                sections=sections,
-                source="fallback_abstract",
-                quality_metrics=self._build_fulltext_quality_metrics(
-                    text=cleaned,
-                    sections=sections,
-                    source="fallback_abstract",
-                ),
-            )
+            return self._build_fallback_result(fallback_text)
+
+        layout_result = self._parse_with_layout_parser(response.content)
+        if layout_result is not None:
+            return layout_result
 
         parsed_text = self._extract_pdf_text(response.content)
         if parsed_text:
@@ -120,6 +139,9 @@ class FulltextParser:
                 ),
             )
 
+        return self._build_fallback_result(fallback_text)
+
+    def _build_fallback_result(self, fallback_text: str) -> FulltextParseResult:
         cleaned = self._normalize_text(fallback_text)
         sections = [{"title": "Abstract", "text": cleaned}] if cleaned else []
         return FulltextParseResult(
@@ -132,6 +154,133 @@ class FulltextParser:
                 source="fallback_abstract",
             ),
         )
+
+    def _parse_with_layout_parser(self, content: bytes) -> FulltextParseResult | None:
+        client = self.layout_parser_client or LayoutParserClient()
+        if not client.is_configured():
+            return None
+
+        try:
+            segments = client.analyze_pdf_bytes(content)
+        except (requests.RequestException, ValueError):
+            return None
+
+        layout_text = self._build_layout_text(segments)
+        if not layout_text:
+            return None
+
+        sections = self._extract_sections(layout_text)
+        artifacts = self._extract_layout_artifacts(segments)
+        quality_metrics = {
+            **self._build_fulltext_quality_metrics(
+                text=layout_text,
+                sections=sections or [{"title": "Full Text", "text": layout_text}],
+                source="layout_pdf",
+            ),
+            "layout_provider": "huridocs",
+            "layout_parse_success": True,
+            "artifact_count": sum(len(values) for values in artifacts.values()),
+        }
+        parser_metadata = {
+            "provider": "huridocs",
+            "segment_count": len(segments),
+            "segment_type_counts": dict(Counter(str(segment.get("type") or "") for segment in segments)),
+        }
+        return FulltextParseResult(
+            text=layout_text,
+            sections=sections or [{"title": "Full Text", "text": layout_text}],
+            source="layout_pdf",
+            quality_metrics=quality_metrics,
+            artifacts=artifacts,
+            parser_metadata=parser_metadata,
+        )
+
+    @classmethod
+    def _build_layout_text(cls, segments: list[dict[str, Any]]) -> str:
+        ordered_segments = sorted(
+            segments,
+            key=lambda segment: (
+                int(segment.get("page_number", 0) or 0),
+                float(segment.get("top", 0.0) or 0.0),
+                float(segment.get("left", 0.0) or 0.0),
+            ),
+        )
+        parts: list[str] = []
+        for segment in ordered_segments:
+            segment_type = str(segment.get("type") or "")
+            text = cls._normalize_text(str(segment.get("text") or ""))
+            if not text or segment_type in cls._LAYOUT_IGNORED_TYPES:
+                continue
+            if segment_type not in cls._LAYOUT_TEXT_TYPES:
+                continue
+            if segment_type in {"Title", "Section header", "Caption"}:
+                text = cls._normalize_layout_heading_like_text(text)
+
+            parts.append(text)
+            if segment_type in {"Title", "Section header", "Caption", "Table"}:
+                parts.append("")
+            elif not text.endswith((".", "?", "!", ":")):
+                parts.append("")
+        return cls._normalize_text("\n".join(parts))
+
+    @classmethod
+    def _extract_layout_artifacts(cls, segments: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        ordered_segments = sorted(
+            segments,
+            key=lambda segment: (
+                int(segment.get("page_number", 0) or 0),
+                float(segment.get("top", 0.0) or 0.0),
+                float(segment.get("left", 0.0) or 0.0),
+            ),
+        )
+        captions = [segment for segment in ordered_segments if str(segment.get("type") or "") == "Caption"]
+        tables: list[dict[str, Any]] = []
+        figures: list[dict[str, Any]] = []
+
+        for segment in ordered_segments:
+            segment_type = str(segment.get("type") or "")
+            if segment_type not in cls._LAYOUT_ARTIFACT_TYPES:
+                continue
+
+            caption = cls._find_nearest_caption(segment, captions)
+            if segment_type == "Table":
+                tables.append(
+                    {
+                        "page": int(segment.get("page_number", 0) or 0),
+                        "caption": caption,
+                        "raw_text": str(segment.get("text") or ""),
+                        "confidence": 1.0,
+                    }
+                )
+            elif segment_type == "Picture":
+                figures.append(
+                    {
+                        "page": int(segment.get("page_number", 0) or 0),
+                        "caption": caption,
+                        "confidence": 1.0 if caption else 0.5,
+                    }
+                )
+
+        return {"tables": tables, "figures": figures}
+
+    @staticmethod
+    def _find_nearest_caption(segment: dict[str, Any], captions: list[dict[str, Any]]) -> str | None:
+        page_number = int(segment.get("page_number", 0) or 0)
+        top = float(segment.get("top", 0.0) or 0.0)
+        same_page_captions = [
+            caption for caption in captions if int(caption.get("page_number", 0) or 0) == page_number
+        ]
+        if not same_page_captions:
+            return None
+
+        nearest = min(
+            same_page_captions,
+            key=lambda caption: abs(float(caption.get("top", 0.0) or 0.0) - top),
+        )
+        text = str(nearest.get("text") or "").strip()
+        if not text:
+            return None
+        return FulltextParser._normalize_layout_heading_like_text(text)
 
     @staticmethod
     def build_chunks(
@@ -166,6 +315,7 @@ class FulltextParser:
                 candidate = section_text[start:end]
 
                 clean_chunk = FulltextParser._strip_inline_heading_prefix(candidate.strip())
+                clean_chunk = FulltextParser._normalize_chunk_opening(clean_chunk)
                 if clean_chunk:
                     metadata = {
                         "section_index": section_index,
@@ -232,6 +382,37 @@ class FulltextParser:
         normalized = re.sub(r"\bDeep Seek\b", "DeepSeek", normalized)
         normalized = re.sub(r"[ \t]+", " ", normalized)
         normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+        return normalized.strip()
+
+    @staticmethod
+    def _normalize_layout_heading_like_text(text: str) -> str:
+        normalized = " ".join(text.split())
+        prefix = ""
+        tokens = normalized.split()
+        if (
+            len(tokens) >= 3
+            and re.fullmatch(r"[A-Z](?:\.\d+)*", tokens[0])
+            and re.fullmatch(r"[A-Z]", tokens[1])
+            and re.fullmatch(r"[A-Z]{2,}", tokens[2])
+        ):
+            prefix = tokens[0]
+            normalized = " ".join(tokens[1:])
+        previous = None
+        while previous != normalized:
+            previous = normalized
+            normalized = re.sub(
+                r"\b([A-Z])\s+([A-Z]{2,})\b",
+                lambda match: f"{match.group(1)}{match.group(2)}",
+                normalized,
+            )
+            normalized = re.sub(
+                r"\b([A-Z])\s+([A-Z][a-z][A-Za-z-]*)\b",
+                lambda match: f"{match.group(1)}{match.group(2)[0].lower()}{match.group(2)[1:]}",
+                normalized,
+            )
+        normalized = re.sub(r"\s+([:;,.!?])", r"\1", normalized)
+        if prefix:
+            normalized = f"{prefix} {normalized}"
         return normalized.strip()
 
     @staticmethod
@@ -315,6 +496,7 @@ class FulltextParser:
             if heading is not None:
                 if current_lines:
                     section_text = cls._normalize_text("\n".join(current_lines))
+                    section_text = cls._normalize_section_text(current_title, section_text)
                     if section_text and not cls._should_drop_section(current_title, section_text):
                         sections.append({"title": current_title, "text": section_text})
                 current_title = heading
@@ -325,16 +507,73 @@ class FulltextParser:
 
         if current_lines:
             section_text = cls._normalize_text("\n".join(current_lines))
+            section_text = cls._normalize_section_text(current_title, section_text)
             if section_text and not cls._should_drop_section(current_title, section_text):
                 sections.append({"title": current_title, "text": section_text})
 
         if len(sections) == 1 and sections[0]["title"] == "Front Matter":
             sections[0]["title"] = "Full Text"
-        return sections
+        return cls._reorder_sections(sections)
+
+    @classmethod
+    def _reorder_sections(cls, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(sections) < 3:
+            return sections
+
+        indexed_sections = list(enumerate(sections))
+        numeric_sections = [
+            (index, sort_key)
+            for index, section in indexed_sections
+            if (sort_key := cls._parse_numeric_section_sort_key(str(section.get("title") or ""))) is not None
+        ]
+        if len(numeric_sections) < 2:
+            return sections
+
+        numeric_order = [sort_key for _, sort_key in numeric_sections]
+        if numeric_order == sorted(numeric_order):
+            return sections
+
+        def sort_key(item: tuple[int, dict[str, Any]]) -> tuple[int, tuple[int, ...], int]:
+            index, section = item
+            title = str(section.get("title") or "")
+            lowered = title.lower()
+            if lowered == "front matter":
+                return (0, (), index)
+            if lowered == "abstract":
+                return (1, (), index)
+            numeric_key = cls._parse_numeric_section_sort_key(title)
+            if numeric_key is not None:
+                return (2, numeric_key, index)
+            return (3, (), index)
+
+        return [section for _, section in sorted(indexed_sections, key=sort_key)]
+
+    @staticmethod
+    def _parse_numeric_section_sort_key(title: str) -> tuple[int, ...] | None:
+        match = re.match(r"^(?P<prefix>\d+(?:\.\d+)*)\b", title.strip())
+        if match is None:
+            return None
+        return tuple(int(part) for part in match.group("prefix").split("."))
+
+    @classmethod
+    def _normalize_section_text(cls, title: str, text: str) -> str:
+        compact = cls._normalize_text(text)
+        if not compact:
+            return compact
+
+        if cls._infer_content_role(title) == "body":
+            lead_fragment_match = re.match(
+                r"^(?P<lead>[a-z][^.]{0,160}\.)\s+(?P<rest>(?:In this section|Here, we|We |This section|To )\b.+)$",
+                compact,
+            )
+            if lead_fragment_match:
+                return lead_fragment_match.group("rest").strip()
+        return compact
 
     @classmethod
     def _normalize_section_heading(cls, line: str) -> str | None:
-        candidate = " ".join(line.split())
+        candidate = cls._normalize_layout_heading_like_text(" ".join(line.split()))
+        candidate = re.sub(r"\s*[–—]\s*", " - ", candidate)
         lowered = candidate.lower()
 
         if lowered in {"figure", "table", "listing"}:
@@ -361,11 +600,13 @@ class FulltextParser:
 
         prefix = match.group("prefix")
         title = match.group("title")
-        major_prefix = int(prefix.split(".")[0])
-        if major_prefix >= 20:
-            return None
-        if prefix.isdigit() and int(prefix) >= 50:
-            return None
+        prefix_root = prefix.split(".")[0]
+        if prefix_root.isdigit():
+            major_prefix = int(prefix_root)
+            if major_prefix >= 20:
+                return None
+            if prefix.isdigit() and int(prefix) >= 50:
+                return None
         if re.search(r"(?:\. ?){2,}\d{1,3}$", candidate):
             return None
         if re.search(r"\s\d{1,3}$", title):
@@ -447,7 +688,15 @@ class FulltextParser:
     def _prettify_section_title(title: str) -> str:
         compact = " ".join(title.split())
         if compact.isupper():
-            return compact.title()
+            return re.sub(
+                r"[A-Z]+",
+                lambda match: (
+                    match.group(0)
+                    if match.group(0) in FulltextParser._KNOWN_UPPERCASE_TITLE_TOKENS or len(match.group(0)) == 1
+                    else match.group(0).capitalize()
+                ),
+                compact,
+            )
         return compact
 
     @staticmethod
@@ -460,7 +709,7 @@ class FulltextParser:
         section_lengths = [len(str(section.get("text") or "")) for section in sections]
         return {
             "parse_source": source,
-            "fallback_used": source != "pdf",
+            "fallback_used": source == "fallback_abstract",
             "text_length": len(text),
             "section_count": len(sections),
             "avg_section_chars": round(sum(section_lengths) / len(section_lengths), 2) if section_lengths else 0,
@@ -693,6 +942,8 @@ class FulltextParser:
     def _looks_like_table_like_chunk(raw_text: str, compact: str) -> bool:
         if "/uni" in raw_text:
             return True
+        if any(token in raw_text.lower() for token in ("<td", "</td", "<tr", "</tr", "<th", "</th")):
+            return True
 
         digits = sum(character.isdigit() for character in compact)
         numeric_cells = len(re.findall(r"\b\d+(?:\.\d+)?\b", compact))
@@ -825,6 +1076,21 @@ class FulltextParser:
         if any(len(word) > 20 for word in head_words):
             return None
         return head, rest
+
+    @staticmethod
+    def _normalize_chunk_opening(text: str) -> str:
+        compact = text.lstrip()
+        if not compact:
+            return compact
+
+        bullet_index = compact.find("• ")
+        if bullet_index != -1 and bullet_index <= 220:
+            prefix = compact[:bullet_index]
+            if re.fullmatch(r"[\s,.;:()\[\]0-9A-Za-z&'\-–/]+", prefix or " "):
+                compact = compact[bullet_index + 2 :].lstrip()
+
+        compact = re.sub(r"^[,;:)\]\}]+\s*", "", compact)
+        return compact
 
     @staticmethod
     def _looks_like_fragmentary_chunk_start(text: str) -> bool:

@@ -6,13 +6,15 @@
 
 ## 2. 시스템 전경
 
-전체 시스템은 "AI 논문 수집 → 메타데이터 정제 및 저장 → PDF 본문 텍스트 파싱 → 청크 적재 → 임베딩 및 토픽 구성 → 토픽 문서 생성 → RAG 검색 및 UI 렌더링"의 흐름으로 구성된다.
+전체 시스템은 "AI 논문 수집 → raw 저장 → PDF 본문 텍스트 파싱과 청크 적재 → arXiv 메타데이터 후속 보강 → 임베딩 및 토픽 구성 → 토픽 문서 생성 → RAG 검색 및 UI 렌더링"의 흐름으로 구성된다.
 
 ```mermaid
 flowchart TD
     A[HF Daily Papers API] --> B[MongoDB<br/>원본 응답 저장]
-    B --> C[arXiv API 보강<br/>카테고리 / PDF / 초록 정규화]
+    B --> C[prepare_papers<br/>HF raw 기반 적재 + PDF 파싱]
     C --> D[PostgreSQL + pgvector<br/>papers / fulltexts / chunks / embeddings / topics / documents]
+    D --> K[arXiv Metadata Enrichment<br/>categories / primary_category / canonical pdf_url]
+    K --> D
     D --> E[Topic Document Generator<br/>개요 / 핵심 발견 생성]
     D --> F[Minimum Retrieval<br/>텍스트 기반 초기 검색]
     D --> G[Vector Retrieval<br/>임베딩 기반 고도화 검색]
@@ -24,9 +26,9 @@ flowchart TD
     H --> J
 ```
 
-HF Daily Papers에서 수집한 결과는 먼저 MongoDB에 원본 그대로 저장한다. 이후 arXiv API로 메타데이터를 보강하고 PDF 본문 텍스트를 파싱하여 PostgreSQL과 pgvector에 구조화된 데이터로 적재한다. 이 데이터는 두 방향으로 사용된다. 첫째는 토픽별 문서를 생성하는 문서 생성 흐름이고, 둘째는 사용자 질문에 대응하는 retrieval + LangChain 기반 RAG 흐름이다. 최종적으로 Streamlit UI는 상단 검색 영역, 하단 토픽 카드 영역, 토픽 문서 상세 화면을 하나의 제품 흐름으로 묶는다.
+HF Daily Papers에서 수집한 결과는 먼저 MongoDB에 원본 그대로 저장한다. 이후 `prepare_papers`는 HF raw 기반 최소 메타데이터와 PDF 파싱 결과를 바탕으로 PostgreSQL과 pgvector에 구조화된 데이터를 적재한다. arXiv API 보강은 별도 `enrich_papers_metadata` 경로로 분리해, 서버에서 천천히 후속 갱신하는 구조를 사용한다. 이 데이터는 두 방향으로 사용된다. 첫째는 토픽별 문서를 생성하는 문서 생성 흐름이고, 둘째는 사용자 질문에 대응하는 retrieval + LangChain 기반 RAG 흐름이다. 최종적으로 Streamlit UI는 상단 검색 영역, 하단 토픽 카드 영역, 토픽 문서 상세 화면을 하나의 제품 흐름으로 묶는다.
 
-ArXplore는 표와 그림 중심 분석보다 텍스트 기반 탐색 경험을 우선한다. 따라서 현재 구조에서 본문 파싱은 텍스트와 섹션 정보를 중심으로 설계하며, 표/그림/캡션 구조화는 후속 확장 대상으로 둔다.
+ArXplore는 표와 그림 중심 분석보다 텍스트 기반 탐색 경험을 우선한다. 다만 현재 `prepare_papers` 구현은 HURIDOCS 레이아웃 파서를 앞단에 붙여 `Table`, `Picture`, `Caption` 같은 artifact 메타데이터를 함께 수집한다. 이 artifact는 아직 retrieval 주 입력으로 쓰지 않지만, `paper_fulltexts.artifacts`와 `parser_metadata`에 저장해 후속 품질 개선과 디버깅에 활용할 수 있게 설계했다.
 
 ## 3. 목표 사용자 흐름
 
@@ -80,7 +82,20 @@ flowchart LR
 - `arxplore-airflow-scheduler`: 스케줄과 태스크 실행을 관리한다.
 - `arxplore-airflow-dag-processor`: DAG 파일을 파싱하고 등록 가능한 형태로 직렬화한다.
 
-현재 초안 기준에서 이 구성이 실제로 기동되고, 4개의 DAG가 등록되는 상태까지 준비되어 있다.
+현재 초안 기준에서 이 구성이 실제로 기동되고, 6개의 DAG가 등록되는 상태까지 준비되어 있다. 다만 PDF 파싱용 HURIDOCS 컨테이너는 서버 스택 기본 구성에 포함하지 않는다. 서버는 MongoDB, PostgreSQL, Airflow 중심으로 유지하고, parser는 개발용 PC에서 별도 `docker-compose.parser.yml`로 띄우는 운영 모델을 현재 기준으로 사용한다.
+
+### 로컬 parser 환경
+
+PDF 파싱 품질 검증과 `prepare_papers` 수동 실행은 로컬 parser 컨테이너를 함께 띄우는 것을 기준으로 한다.
+
+```mermaid
+flowchart LR
+    Dev[arxplore-dev] --> Parser[arxplore-layout-parser<br/>HURIDOCS]
+    Dev --> PG[(Remote PostgreSQL)]
+    Dev --> MG[(Remote MongoDB)]
+```
+
+이 토폴로지에서는 PDF 다운로드, 레이아웃 분석, `pypdf` fallback, 청크 생성이 개발용 PC의 CPU/GPU를 사용하고, MongoDB와 PostgreSQL은 기존 서버에 그대로 적재된다. 즉 MongoDB raw는 source of truth이고, PostgreSQL 정제층은 재생성 가능한 캐시 계층으로 취급할 수 있다.
 
 ## 5. 코드베이스 모듈 구조
 
@@ -108,7 +123,7 @@ flowchart TD
 
 ### `src/pipeline`
 
-`src/pipeline`은 Airflow DAG가 호출하는 실행 진입점 계층이다. `collect_papers.py`, `prepare_papers.py`, `embed_papers.py`, `analyze_topics.py`는 각각 파이프라인 단계 하나씩을 담당한다. 현재는 스캐폴드 상태이므로 단계명과 trace config를 반환하는 최소 구조만 존재하지만, 이후 각 담당자가 실제 비즈니스 로직을 이 위치에 구현하게 된다.
+`src/pipeline`은 Airflow DAG가 호출하는 실행 진입점 계층이다. `collect_papers.py`, `prepare_papers.py`, `embed_papers.py`, `analyze_topics.py`는 물론, 과거 raw를 누적하는 `backfill_collect_papers`와 저장된 논문 메타를 후속 보강하는 `enrich_papers_metadata` 경로까지 이 계층에서 관리한다. 이 중 `prepare_papers.py`는 더 이상 스캐폴드가 아니라 실제 전처리 로직을 수행한다. raw payload 로드, arXiv ID 추출, HF raw 기반 최소 메타데이터 정리, PDF 파싱, chunk 생성, PostgreSQL 적재까지 이 계층에서 처리한다. arXiv 메타데이터 보강은 `enrich_papers_metadata.py`가 따로 담당한다. 반면 `embed_papers.py`와 `analyze_topics.py`는 아직 최소 반환 구조 중심으로 남아 있다.
 
 ### `dags`
 
@@ -120,27 +135,31 @@ flowchart TD
 
 ### `src/integrations`
 
-`src/integrations`는 외부 서비스 연동 계층이다. `paper_search.py`, `raw_store.py`, `paper_repository.py`, `topic_repository.py`, `embedding_client.py`, `vector_repository.py`를 기준으로 역할별 구현을 시작하도록 구성되어 있다. 현재 운영 기준에서는 1번 역할이 쓰기 경로와 최소 retrieval 준비를 주도하고, 2번 역할이 임베딩과 vector retrieval 고도화를 담당한다.
+`src/integrations`는 외부 서비스 연동 계층이다. `paper_search.py`, `raw_store.py`, `paper_repository.py`, `topic_repository.py`, `embedding_client.py`, `vector_repository.py`를 기준으로 역할별 구현을 시작하도록 구성되어 있다. 여기에 현재는 `fulltext_parser.py`와 `layout_parser_client.py`가 실제 PDF 파싱 경로를 담당한다. `LayoutParserClient`는 HURIDOCS `POST /` JSON 응답을 검증하고, `FulltextParser`는 `layout_pdf -> pypdf -> fallback_abstract` 순서로 파싱을 시도하며 section 정리, heading 보정, chunk 품질 보정까지 담당한다. 현재 운영 기준에서는 1번 역할이 쓰기 경로와 최소 retrieval 준비를 주도하고, 2번 역할이 임베딩과 vector retrieval 고도화를 담당한다.
 
 ## 6. 데이터 흐름
 
 데이터는 아래 순서로 이동한다.
 
 1. HF Daily Papers에서 날짜별 논문 목록을 수집한다.
-2. 원본 응답을 MongoDB에 저장한다.
-3. arXiv API로 카테고리, PDF 링크, 발행일을 보강한다.
-4. PDF 본문 텍스트와 섹션 정보를 파싱한다.
-5. 정제된 논문, 본문 텍스트, 청크를 PostgreSQL에 저장한다.
-6. 최소 retrieval이 청크 기반 검색 경로를 제공한다.
-7. 임베딩을 생성하고 벡터 검색 가능한 형태로 저장한다.
-8. 유사 논문들을 토픽 단위로 묶는다.
-9. 토픽별 논문 묶음을 기준으로 `개요`, `핵심 발견`을 생성한다.
-10. 논문 메타데이터와 관련 토픽 메타데이터를 결정적으로 조합한다.
-11. 최종 `TopicDocument`를 저장한다.
-12. 사용자 질문이 들어오면 먼저 최소 retrieval 또는 최종 vector retrieval을 통해 논문 청크와 토픽 문서를 검색한다.
-13. 검색 결과를 바탕으로 답변을 생성하고 근거 논문과 함께 UI에 노출한다.
+2. 최신 수집 경로와 별도로 backfill DAG가 과거 날짜를 하루 최대 30일씩 MongoDB에 채운다.
+3. 원본 응답을 MongoDB에 저장한다.
+4. `prepare_papers`가 HF raw 기반 최소 메타데이터를 정리한다.
+5. PDF 본문 텍스트와 섹션 정보를 파싱한다.
+6. 가능하면 HURIDOCS 레이아웃 파서를 먼저 사용하고, 실패 시 `pypdf`로 fallback한다.
+7. 파싱 결과에서 본문 텍스트, 섹션, 품질 메트릭, artifact 메타데이터를 만든다.
+8. 정제된 논문, 본문 텍스트, 청크를 PostgreSQL에 저장한다.
+9. `enrich_papers_metadata`가 저장된 논문에 arXiv 메타데이터를 후속 보강한다.
+10. 최소 retrieval이 청크 기반 검색 경로를 제공한다.
+11. 임베딩을 생성하고 벡터 검색 가능한 형태로 저장한다.
+12. 유사 논문들을 토픽 단위로 묶는다.
+13. 토픽별 논문 묶음을 기준으로 `개요`, `핵심 발견`을 생성한다.
+14. 논문 메타데이터와 관련 토픽 메타데이터를 결정적으로 조합한다.
+15. 최종 `TopicDocument`를 저장한다.
+16. 사용자 질문이 들어오면 먼저 최소 retrieval 또는 최종 vector retrieval을 통해 논문 청크와 토픽 문서를 검색한다.
+17. 검색 결과를 바탕으로 답변을 생성하고 근거 논문과 함께 UI에 노출한다.
 
-이 흐름은 저장소의 목표 구조이며, 현재 초안에서는 실행 순서와 책임 위치만 확정된 상태이다. 실제 저장 쿼리, 임베딩 계산, 클러스터링, 검색, 조회는 이후 구현 단계에서 채운다.
+이 흐름은 현재 저장소 기준에서 실행 순서와 책임 위치가 비교적 명확하게 분리된 상태이다. `collect_papers`, `backfill_collect_papers`, `prepare_papers`, `enrich_papers_metadata`는 실제 동작 경로를 갖고 있고, `embed_papers`, `analyze_topics`, 최종 retrieval 고도화는 이후 구현 단계에서 채운다.
 
 ## 7. 저장 구조
 
@@ -159,7 +178,7 @@ PostgreSQL은 정제된 논문과 관계형 메타데이터를 저장하고, pgv
 - `topics`
 - `topic_documents`
 
-`paper_fulltexts`는 PDF에서 추출한 본문 텍스트와 섹션 정보를 저장하고, `paper_chunks`와 `paper_embeddings`는 RAG 검색에 직접 사용된다. `topics`와 `topic_documents`는 카드 UI와 문서 상세 화면의 핵심 입력이 된다.
+`paper_fulltexts`는 PDF에서 추출한 본문 텍스트와 섹션 정보에 더해 `quality_metrics`, `artifacts`, `parser_metadata`를 저장한다. `paper_chunks`와 `paper_embeddings`는 RAG 검색에 직접 사용되고, 현재 chunk role은 `body`, `front_matter`, `references` 중심으로 유지한다. `topics`와 `topic_documents`는 카드 UI와 문서 상세 화면의 핵심 입력이 된다.
 
 ## 8. `TopicDocument` 계약
 
@@ -196,10 +215,12 @@ class TopicDocument(BaseModel):
 
 ## 9. LangSmith 추적
 
-LangSmith는 LLM 체인과 파이프라인 단계를 추적하는 용도로 사용한다. 현재 기준 trace stage는 다음 네 가지이다.
+LangSmith는 LLM 체인과 파이프라인 단계를 추적하는 용도로 사용한다. 현재 기준 trace stage는 다음 여섯 가지이다.
 
 - `stage=collect_papers`: 논문 수집
+- `stage=backfill_collect_papers`: 과거 raw 백필 수집
 - `stage=prepare_papers`: 논문 전처리
+- `stage=enrich_papers_metadata`: 저장된 논문의 arXiv 메타데이터 후속 보강
 - `stage=embed_papers`: 임베딩 및 토픽 묶기
 - `stage=analyze_topics`: 토픽 문서 생성
 

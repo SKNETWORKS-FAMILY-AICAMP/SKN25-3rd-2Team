@@ -1,4 +1,4 @@
-"""임베딩 및 토픽 묶기 DAG 스캐폴드."""
+"""임베딩 생성과 토픽 묶기를 오케스트레이션하는 DAG 스캐폴드."""
 
 from __future__ import annotations
 
