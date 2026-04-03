@@ -38,6 +38,29 @@ class PrepareJobRepository:
                 VALUES (%s, %s, %s, %s, 'pending', 0, NOW(), NOW())
                 ON CONFLICT (mode, target_date)
                 DO UPDATE SET
+                    source = EXCLUDED.source,
+                    payload = EXCLUDED.payload,
+                    status = CASE
+                        WHEN prepare_jobs.status = 'processing' THEN prepare_jobs.status
+                        WHEN prepare_jobs.status = 'done' THEN prepare_jobs.status
+                        ELSE 'pending'
+                    END,
+                    worker_id = CASE
+                        WHEN prepare_jobs.status = 'processing' THEN prepare_jobs.worker_id
+                        ELSE NULL
+                    END,
+                    error = CASE
+                        WHEN prepare_jobs.status = 'processing' THEN prepare_jobs.error
+                        ELSE NULL
+                    END,
+                    claimed_at = CASE
+                        WHEN prepare_jobs.status = 'processing' THEN prepare_jobs.claimed_at
+                        ELSE NULL
+                    END,
+                    finished_at = CASE
+                        WHEN prepare_jobs.status = 'processing' THEN prepare_jobs.finished_at
+                        ELSE NULL
+                    END,
                     updated_at = NOW()
                 RETURNING id, status, created_at = updated_at AS inserted
                 """,

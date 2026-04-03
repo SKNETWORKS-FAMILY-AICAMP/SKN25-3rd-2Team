@@ -22,7 +22,8 @@ class PaperRepository:
 
     def save_paper(self, paper: dict[str, Any]) -> str:
         """정제 논문 1건을 저장하고 arxiv_id를 반환한다."""
-        arxiv_id = str(paper["arxiv_id"]).strip()
+        sanitized_paper = self._sanitize_json_value(paper)
+        arxiv_id = str(sanitized_paper["arxiv_id"]).strip()
         if not arxiv_id:
             raise ValueError("paper['arxiv_id']는 비어 있을 수 없습니다.")
 
@@ -57,19 +58,19 @@ class PaperRepository:
                 """,
                 {
                     "arxiv_id": arxiv_id,
-                    "title": paper.get("title", ""),
-                    "authors": Json(paper.get("authors", [])),
-                    "abstract": paper.get("abstract", ""),
-                    "primary_category": paper.get("primary_category"),
-                    "categories": Json(paper.get("categories", [])),
-                    "pdf_url": paper.get("pdf_url"),
-                    "published_at": self._to_datetime(paper.get("published_at")),
-                    "arxiv_updated_at": self._to_datetime(paper.get("updated_at")),
-                    "upvotes": int(paper.get("upvotes") or 0),
-                    "github_url": paper.get("github_url"),
-                    "github_stars": self._to_int_or_none(paper.get("github_stars")),
-                    "citation_count": self._to_int_or_none(paper.get("citation_count")),
-                    "source": paper.get("source", "hf_daily_papers"),
+                    "title": sanitized_paper.get("title", ""),
+                    "authors": Json(sanitized_paper.get("authors", [])),
+                    "abstract": sanitized_paper.get("abstract", ""),
+                    "primary_category": sanitized_paper.get("primary_category"),
+                    "categories": Json(sanitized_paper.get("categories", [])),
+                    "pdf_url": sanitized_paper.get("pdf_url"),
+                    "published_at": self._to_datetime(sanitized_paper.get("published_at")),
+                    "arxiv_updated_at": self._to_datetime(sanitized_paper.get("updated_at")),
+                    "upvotes": int(sanitized_paper.get("upvotes") or 0),
+                    "github_url": sanitized_paper.get("github_url"),
+                    "github_stars": self._to_int_or_none(sanitized_paper.get("github_stars")),
+                    "citation_count": self._to_int_or_none(sanitized_paper.get("citation_count")),
+                    "source": sanitized_paper.get("source", "hf_daily_papers"),
                 },
             )
         return arxiv_id
@@ -86,6 +87,11 @@ class PaperRepository:
         parser_metadata: dict[str, Any] | None = None,
     ) -> None:
         """논문 본문 텍스트를 저장한다."""
+        sanitized_text = self._sanitize_text(text)
+        sanitized_sections = self._sanitize_json_value(sections or [])
+        sanitized_quality_metrics = self._sanitize_json_value(quality_metrics or {})
+        sanitized_artifacts = self._sanitize_json_value(artifacts or {})
+        sanitized_parser_metadata = self._sanitize_json_value(parser_metadata or {})
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -105,12 +111,12 @@ class PaperRepository:
                 """,
                 (
                     arxiv_id,
-                    text,
-                    Json(sections or []),
+                    sanitized_text,
+                    Json(sanitized_sections),
                     source,
-                    Json(quality_metrics or {}),
-                    Json(artifacts or {}),
-                    Json(parser_metadata or {}),
+                    Json(sanitized_quality_metrics),
+                    Json(sanitized_artifacts),
+                    Json(sanitized_parser_metadata),
                 ),
             )
 
@@ -118,10 +124,11 @@ class PaperRepository:
         """논문 청크 목록을 저장한다."""
         if not chunks:
             return
+        sanitized_chunks = self._sanitize_json_value(chunks)
 
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute("DELETE FROM paper_chunks WHERE arxiv_id = %s", (arxiv_id,))
-            for chunk in chunks:
+            for chunk in sanitized_chunks:
                 cursor.execute(
                     """
                     INSERT INTO paper_chunks (arxiv_id, chunk_index, chunk_text, section_title, token_count, metadata, updated_at)
@@ -632,6 +639,22 @@ class PaperRepository:
             "host": resolved_host,
             "port": resolved_port,
         }
+
+    @classmethod
+    def _sanitize_json_value(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return cls._sanitize_text(value)
+        if isinstance(value, list):
+            return [cls._sanitize_json_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [cls._sanitize_json_value(item) for item in value]
+        if isinstance(value, dict):
+            return {cls._sanitize_text(str(key)): cls._sanitize_json_value(item) for key, item in value.items()}
+        return value
+
+    @staticmethod
+    def _sanitize_text(value: str) -> str:
+        return "".join(char for char in value if not 0xD800 <= ord(char) <= 0xDFFF)
 
     @staticmethod
     def _to_datetime(value: Any) -> datetime | None:
