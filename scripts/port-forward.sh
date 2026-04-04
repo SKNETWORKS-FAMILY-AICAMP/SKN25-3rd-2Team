@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-PID_FILE="${REPO_ROOT}/.port-forward.pid"
 
 source "${REPO_ROOT}/.env"
 
@@ -13,15 +12,12 @@ POSTGRES_PORT="${SERVER_POSTGRES_PORT:-15432}"
 MONGO_PORT="${SERVER_MONGO_PORT:-17017}"
 ACTION="${1:-start}"
 
+get_running_pids() {
+  pgrep -f "ssh -N .*${AIRFLOW_PORT}:${SERVER_IP}:${AIRFLOW_PORT}.*${POSTGRES_PORT}:${SERVER_IP}:${POSTGRES_PORT}.*${MONGO_PORT}:${SERVER_IP}:${MONGO_PORT}.*localhost" || true
+}
+
 is_running() {
-  if [[ -f "${PID_FILE}" ]]; then
-    local pid
-    pid="$(cat "${PID_FILE}")"
-    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-      return 0
-    fi
-  fi
-  return 1
+  [[ -n "$(get_running_pids)" ]]
 }
 
 check_port_available() {
@@ -41,22 +37,23 @@ PY
 
 stop_forward() {
   if is_running; then
-    local pid
-    pid="$(cat "${PID_FILE}")"
-    kill "${pid}" 2>/dev/null || true
-    rm -f "${PID_FILE}"
-    echo "[port-forward] 종료 (PID: ${pid})"
+    local pids
+    pids="$(get_running_pids)"
+    while read -r pid; do
+      [[ -n "${pid}" ]] || continue
+      kill "${pid}" 2>/dev/null || true
+    done <<< "${pids}"
+    echo "[port-forward] 종료 (PID: ${pids//$'\n'/, })"
     return 0
   fi
-  rm -f "${PID_FILE}"
   echo "[port-forward] 실행 중인 포워딩 없음"
 }
 
 status_forward() {
   if is_running; then
-    local pid
-    pid="$(cat "${PID_FILE}")"
-    echo "[port-forward] 실행 중 (PID: ${pid})"
+    local pids
+    pids="$(get_running_pids)"
+    echo "[port-forward] 실행 중 (PID: ${pids//$'\n'/, })"
   else
     echo "[port-forward] 중지됨"
   fi
@@ -83,8 +80,8 @@ case "${ACTION}" in
 esac
 
 if is_running; then
-  pid="$(cat "${PID_FILE}")"
-  echo "[port-forward] 이미 실행 중 (PID: ${pid})"
+  pids="$(get_running_pids)"
+  echo "[port-forward] 이미 실행 중 (PID: ${pids//$'\n'/, })"
   echo "필요하면: bash scripts/port-forward.sh restart"
   exit 0
 fi
@@ -110,10 +107,8 @@ ssh -N \
   localhost &
 
 SSH_PID=$!
-echo "${SSH_PID}" > "${PID_FILE}"
 echo ""
 echo "[port-forward] 포워딩 활성화 (PID: ${SSH_PID})"
 
-trap "kill ${SSH_PID} 2>/dev/null; rm -f '${PID_FILE}'; echo ''; echo '[port-forward] 종료'; exit 0" INT TERM
+trap "kill ${SSH_PID} 2>/dev/null; echo ''; echo '[port-forward] 종료'; exit 0" INT TERM
 wait ${SSH_PID}
-rm -f "${PID_FILE}"

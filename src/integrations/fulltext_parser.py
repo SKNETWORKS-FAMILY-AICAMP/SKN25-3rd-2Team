@@ -345,6 +345,7 @@ class FulltextParser:
                 if end >= len(section_text):
                     break
                 start = FulltextParser._adjust_next_chunk_start(section_text, end, overlap_chars)
+        FulltextParser._refine_chunk_content_roles(chunks)
         FulltextParser._annotate_chunk_links(chunks)
         return chunks
 
@@ -561,6 +562,8 @@ class FulltextParser:
         if not compact:
             return compact
 
+        compact = cls._strip_trailing_reference_like_tail(title, compact)
+
         if cls._infer_content_role(title) == "body":
             lead_fragment_match = re.match(
                 r"^(?P<lead>[a-z][^.]{0,160}\.)\s+(?P<rest>(?:In this section|Here, we|We |This section|To )\b.+)$",
@@ -569,6 +572,67 @@ class FulltextParser:
             if lead_fragment_match:
                 return lead_fragment_match.group("rest").strip()
         return compact
+
+    @classmethod
+    def _strip_trailing_reference_like_tail(cls, title: str, text: str) -> str:
+        lowered_title = title.lower()
+        if not any(
+            keyword in lowered_title
+            for keyword in (
+                "conclusion",
+                "discussion",
+                "appendix",
+                "additional analysis",
+                "supplementary",
+                "limitations",
+                "experimental details",
+                "implementation details",
+            )
+        ):
+            return text
+
+        paragraphs = [paragraph.strip() for paragraph in re.split(r"\n{2,}", text) if paragraph.strip()]
+        if not paragraphs:
+            return text
+
+        while paragraphs and cls._looks_like_reference_tail_paragraph(paragraphs[-1]):
+            paragraphs.pop()
+
+        trimmed = "\n\n".join(paragraphs).strip()
+        return trimmed or text
+
+    @staticmethod
+    def _looks_like_reference_tail_paragraph(text: str) -> bool:
+        compact = " ".join(text.split())
+        if not compact:
+            return False
+
+        reference_markers = len(re.findall(r"\[\d+\]", compact))
+        year_markers = len(re.findall(r"\b(?:19|20)\d{2}\b", compact))
+        url_markers = len(re.findall(r"https?\s*:\s*//|doi:|arxiv:", compact, re.IGNORECASE))
+        sentence_breaks = compact.count(". ") + compact.count("? ") + compact.count("! ")
+        venue_markers = len(
+            re.findall(
+                r"\b(?:Proceedings|Conference|CVPR|ICCV|ECCV|NeurIPS|ICLR|ACL|EMNLP|AAAI|Google)\b",
+                compact,
+                re.IGNORECASE,
+            )
+        )
+        author_list_like = bool(
+            re.match(r"^(?:\[\d+\]\s*)?[A-Z][A-Za-z'`.-]+,\s+[A-Z](?:\.[A-Z])?(?:,\s+[A-Z][A-Za-z'`.-]+,\s+[A-Z](?:\.[A-Z])?){1,}", compact)
+        )
+
+        if reference_markers >= 2:
+            return True
+        if reference_markers >= 1 and year_markers >= 2 and sentence_breaks <= 3:
+            return True
+        if url_markers >= 1 and year_markers >= 1 and venue_markers >= 1:
+            return True
+        if author_list_like and year_markers >= 1:
+            return True
+        if compact.startswith(("In: ", "[", "doi:", "https://", "http://")) and (year_markers >= 1 or venue_markers >= 1):
+            return True
+        return False
 
     @classmethod
     def _normalize_section_heading(cls, line: str) -> str | None:
@@ -865,10 +929,14 @@ class FulltextParser:
     @classmethod
     def _infer_chunk_content_role(cls, section_title: str, chunk_text: str) -> str:
         section_role = cls._infer_content_role(section_title)
+        compact = " ".join(chunk_text.split())
+        if section_role == "front_matter":
+            if cls._looks_like_table_like_chunk(chunk_text, compact):
+                return "table_like"
+            return section_role
         if section_role != "body":
             return section_role
 
-        compact = " ".join(chunk_text.split())
         if cls._looks_like_toc_line(compact):
             return "toc"
         if cls._looks_like_figure_caption_chunk(compact):
@@ -879,16 +947,48 @@ class FulltextParser:
             re.IGNORECASE,
         ):
             return "body"
+        if cls._looks_like_body_chunk(section_title, compact):
+            return "body"
         if cls._looks_like_reference_chunk(compact):
             return "references"
         if cls._looks_like_table_like_chunk(chunk_text, compact):
             return "table_like"
         return "body"
 
+    @classmethod
+    def _refine_chunk_content_roles(cls, chunks: list[dict[str, Any]]) -> None:
+        for chunk in chunks:
+            metadata = chunk.setdefault("metadata", {})
+            section_title = str(chunk.get("section_title") or "")
+            chunk_text = str(chunk.get("chunk_text") or "")
+            compact = " ".join(chunk_text.split())
+            current_role = str(metadata.get("content_role") or "body")
+            section_role = cls._infer_content_role(section_title)
+            body_like = cls._looks_like_body_chunk(section_title, compact)
+            reference_like = cls._looks_like_reference_chunk(compact)
+
+            if section_role == "references":
+                metadata["content_role"] = "references"
+                continue
+
+            if current_role == "references" and body_like:
+                metadata["content_role"] = "body"
+                continue
+
+            if current_role in {"body", "appendix"} and reference_like and not body_like:
+                metadata["content_role"] = "references"
+                continue
+
+            if current_role in {"body", "front_matter"} and not body_like and cls._looks_like_table_like_chunk(chunk_text, compact):
+                metadata["content_role"] = "table_like"
+
     @staticmethod
     def _looks_like_reference_chunk(compact: str) -> bool:
         compact_prefix = compact[:260]
         if not compact_prefix:
+            return False
+
+        if FulltextParser._looks_like_body_chunk("Full Text", compact_prefix):
             return False
 
         if re.match(r"^(?:\[\d+\]|\d+\.)\s+[A-Z]", compact_prefix):
@@ -947,6 +1047,11 @@ class FulltextParser:
 
         digits = sum(character.isdigit() for character in compact)
         numeric_cells = len(re.findall(r"\b\d+(?:\.\d+)?\b", compact))
+        symbol_cells = len(re.findall(r"[✓✔✗✘]", compact))
+        percentage_cells = len(re.findall(r"\b\d+(?:\.\d+)?%", compact))
+        short_code_cells = len(
+            re.findall(r"\b(?:MCQ|OE|A&M|IoU|FVD|PSNR|SSIM|M|A|S|T|R|F1|Top-1|Top-5)\b", compact, re.IGNORECASE)
+        )
         line_break_count = raw_text.count("\n")
         lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
         first_line = lines[0] if lines else compact[:160]
@@ -964,6 +1069,11 @@ class FulltextParser:
             or re.match(r"^\d+\.\s*[A-Z][^.]{0,140}\([a-z]\)", compact)
             or repeated_matrix_tokens >= 6
         )
+        compact_row_like_block = (
+            numeric_cells >= 10
+            and (symbol_cells >= 2 or percentage_cells >= 2 or short_code_cells >= 3)
+            and len(re.findall(r"\b[A-Z][A-Za-z-]{2,}\b", compact)) >= 4
+        )
         strong_numeric_block = (
             (compact and digits / len(compact) > 0.28 and line_break_count >= 5)
             or (re.match(r"^[\d.,;:()%-]", compact) and numeric_cells >= 10 and line_break_count >= 2)
@@ -974,6 +1084,7 @@ class FulltextParser:
             )
             or repeated_matrix_tokens >= 6
             or (len(lines) >= 8 and numeric_heavy_lines >= max(6, int(len(lines) * 0.7)) and digits / max(1, len(compact)) > 0.08)
+            or compact_row_like_block
         )
 
         if FulltextParser._starts_like_body_paragraph(first_line, compact) and not explicit_tabular_opening:
@@ -993,6 +1104,30 @@ class FulltextParser:
             return True
         if len(lines) >= 8 and numeric_heavy_lines >= max(6, int(len(lines) * 0.7)) and digits / max(1, len(compact)) > 0.08:
             return True
+        if compact_row_like_block:
+            return True
+        return False
+
+    @staticmethod
+    def _looks_like_body_chunk(section_title: str, compact: str) -> bool:
+        if not compact:
+            return False
+
+        lowered_title = section_title.lower()
+        if any(
+            keyword in lowered_title
+            for keyword in ("introduction", "method", "approach", "experiment", "result", "discussion", "conclusion", "abstract", "related work")
+        ):
+            if FulltextParser._starts_like_body_paragraph(compact[:180], compact):
+                return True
+
+        sentence_breaks = compact.count(". ") + compact.count("? ") + compact.count("! ")
+        alphabetic_tokens = re.findall(r"[A-Za-z]{3,}", compact[:260])
+        citation_markers = len(re.findall(r"\[\d+\]", compact[:260]))
+
+        if sentence_breaks >= 1 and len(alphabetic_tokens) >= 12 and citation_markers <= 8:
+            if re.match(r"^[A-Z][a-z]", compact):
+                return True
         return False
 
     @staticmethod

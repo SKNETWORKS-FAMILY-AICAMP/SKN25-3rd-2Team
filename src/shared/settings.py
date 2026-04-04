@@ -43,6 +43,7 @@ class AppSettings(BaseSettings):
     app_postgres_db: Optional[str] = Field(default=None, alias="APP_POSTGRES_DB")
     postgres_user: Optional[str] = Field(default=None, alias="POSTGRES_USER")
     postgres_password: Optional[str] = Field(default=None, alias="POSTGRES_PASSWORD")
+    prepare_job_stale_seconds: int = Field(default=900, alias="PREPARE_JOB_STALE_SECONDS")
 
     langsmith_api_key: Optional[str] = Field(default=None, alias="LANGSMITH_API_KEY")
     langsmith_project: str = Field(default="ArXplore", alias="LANGSMITH_PROJECT")

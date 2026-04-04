@@ -386,6 +386,7 @@ class PaperRepository:
         normalized_query = " ".join(query.split())
         if not normalized_query:
             return []
+        normalized_query_for_fts = re.sub(r"[-/]+", " ", normalized_query)
 
         arxiv_filter_sql = ""
         arxiv_filter_params: tuple[Any, ...] = ()
@@ -405,19 +406,49 @@ class PaperRepository:
                         c.chunk_text,
                         c.chunk_index,
                         c.section_title,
-                        ts_rank_cd(
-                            setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
-                            setweight(to_tsvector('english', coalesce(p.abstract, '')), 'B') ||
-                            setweight(to_tsvector('english', coalesce(c.chunk_text, '')), 'C'),
-                            websearch_to_tsquery('english', %s)
+                        (
+                            ts_rank_cd(
+                                setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
+                                setweight(to_tsvector('english', coalesce(p.abstract, '')), 'B') ||
+                                setweight(to_tsvector('english', coalesce(c.chunk_text, '')), 'C'),
+                                websearch_to_tsquery('english', %s)
+                            )
+                            +
+                            0.65 * ts_rank_cd(
+                                setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
+                                setweight(to_tsvector('english', coalesce(p.abstract, '')), 'B') ||
+                                setweight(to_tsvector('english', coalesce(c.chunk_text, '')), 'C'),
+                                plainto_tsquery('english', %s)
+                            )
                         ) AS fts_score,
                         CASE
                             WHEN p.title ILIKE ('%%' || %s || '%%') THEN 0.45
                             WHEN p.abstract ILIKE ('%%' || %s || '%%') THEN 0.2
                             WHEN c.chunk_text ILIKE ('%%' || %s || '%%') THEN 0.15
                             ELSE 0
-                        END AS ilike_bonus
-                        ,
+                        END AS ilike_bonus,
+                        CASE
+                            WHEN coalesce(c.metadata->>'content_role', '') = 'references' THEN -0.24
+                            WHEN coalesce(c.metadata->>'content_role', '') = 'toc' THEN -0.28
+                            WHEN coalesce(c.metadata->>'content_role', '') = 'front_matter' THEN -0.14
+                            WHEN coalesce(c.metadata->>'content_role', '') = 'table_like' THEN -0.12
+                            WHEN coalesce(c.metadata->>'content_role', '') = 'figure_caption' THEN -0.08
+                            WHEN coalesce(c.metadata->>'content_role', '') = 'appendix' THEN -0.08
+                            ELSE 0
+                        END AS content_role_adjustment,
+                        CASE
+                            WHEN c.section_title ILIKE 'Abstract' THEN 0.16
+                            WHEN c.section_title ILIKE '%%Introduction%%' THEN 0.1
+                            WHEN c.section_title ILIKE '%%Method%%' OR c.section_title ILIKE '%%Approach%%' THEN 0.04
+                            WHEN c.section_title ILIKE '%%Related Work%%' THEN 0.02
+                            WHEN c.section_title ILIKE '%%Conclusion%%' THEN -0.02
+                            WHEN c.section_title ILIKE '%%Discussion%%' THEN -0.02
+                            WHEN c.section_title ILIKE '%%Appendix%%' THEN -0.08
+                            WHEN c.section_title ILIKE '%%Additional Analysis%%' THEN -0.08
+                            WHEN c.section_title ILIKE '%%Experimental Details%%' THEN -0.06
+                            WHEN c.section_title ILIKE '%%Implementation Details%%' THEN -0.06
+                            ELSE 0
+                        END AS section_boost,
                         CASE
                             WHEN c.section_title ILIKE '%%Table of Contents%%' THEN -0.12
                             WHEN c.section_title ILIKE '%%References%%' THEN -0.08
@@ -429,6 +460,7 @@ class PaperRepository:
                     WHERE
                         1 = 1
                         {arxiv_filter_sql}
+                        AND coalesce(c.metadata->>'content_role', '') <> 'toc'
                         AND
                         (
                             (
@@ -436,6 +468,11 @@ class PaperRepository:
                                 setweight(to_tsvector('english', coalesce(p.abstract, '')), 'B') ||
                                 setweight(to_tsvector('english', coalesce(c.chunk_text, '')), 'C')
                             ) @@ websearch_to_tsquery('english', %s)
+                            OR (
+                                setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
+                                setweight(to_tsvector('english', coalesce(p.abstract, '')), 'B') ||
+                                setweight(to_tsvector('english', coalesce(c.chunk_text, '')), 'C')
+                            ) @@ plainto_tsquery('english', %s)
                             OR p.title ILIKE ('%%' || %s || '%%')
                             OR p.abstract ILIKE ('%%' || %s || '%%')
                             OR c.chunk_text ILIKE ('%%' || %s || '%%')
@@ -449,19 +486,23 @@ class PaperRepository:
                     chunk_text,
                     chunk_index,
                     section_title,
-                    (fts_score + ilike_bonus + structural_adjustment) AS score
+                    (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) AS score
                 FROM ranked
-                WHERE (fts_score + ilike_bonus + structural_adjustment) > 0.02
+                WHERE (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) > 0.01
                 ORDER BY score DESC, chunk_id DESC
                 LIMIT %s
                 """,
-                arxiv_filter_params
+                (
+                    normalized_query,
+                    normalized_query_for_fts,
+                    normalized_query,
+                    normalized_query,
+                    normalized_query,
+                )
+                + arxiv_filter_params
                 + (
                     normalized_query,
-                    normalized_query,
-                    normalized_query,
-                    normalized_query,
-                    normalized_query,
+                    normalized_query_for_fts,
                     normalized_query,
                     normalized_query,
                     normalized_query,

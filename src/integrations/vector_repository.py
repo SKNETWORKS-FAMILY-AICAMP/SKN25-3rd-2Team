@@ -97,24 +97,64 @@ class VectorRepository:
     ) -> list[dict[str, Any]]:
         """질문 임베딩과 유사한 논문 청크 목록을 반환한다."""
         query = """
-            SELECT
-                c.id,
-                c.arxiv_id,
-                p.title,
-                c.chunk_text,
-                c.chunk_index,
-                c.section_title,
-                1 - (e.embedding <=> %s::vector) AS similarity_score
-            FROM paper_embeddings e
-            JOIN paper_chunks c ON c.id = e.chunk_id
-            JOIN papers p ON p.arxiv_id = c.arxiv_id
+            WITH ranked AS (
+                SELECT
+                    c.id,
+                    c.arxiv_id,
+                    p.title,
+                    c.chunk_text,
+                    c.chunk_index,
+                    c.section_title,
+                    COALESCE(c.metadata->>'content_role', '') AS content_role,
+                    1 - (e.embedding <=> %s::vector) AS raw_similarity_score,
+                    CASE
+                        WHEN COALESCE(c.metadata->>'content_role', '') = 'references' THEN -0.22
+                        WHEN COALESCE(c.metadata->>'content_role', '') = 'toc' THEN -0.28
+                        WHEN COALESCE(c.metadata->>'content_role', '') = 'front_matter' THEN -0.16
+                        WHEN COALESCE(c.metadata->>'content_role', '') = 'table_like' THEN -0.1
+                        WHEN COALESCE(c.metadata->>'content_role', '') = 'figure_caption' THEN -0.08
+                        WHEN COALESCE(c.metadata->>'content_role', '') = 'appendix' THEN -0.1
+                        ELSE 0
+                    END AS content_role_adjustment,
+                    CASE
+                        WHEN c.section_title ILIKE 'Abstract' THEN 0.12
+                        WHEN c.section_title ILIKE '%%Introduction%%' THEN 0.09
+                        WHEN c.section_title ILIKE '%%Method%%' OR c.section_title ILIKE '%%Approach%%' THEN 0.03
+                        WHEN c.section_title ILIKE '%%Related Work%%' THEN 0.02
+                        WHEN c.section_title ILIKE '%%Conclusion%%' THEN -0.03
+                        WHEN c.section_title ILIKE '%%Discussion%%' THEN -0.03
+                        WHEN c.section_title ILIKE '%%Appendix%%' THEN -0.1
+                        WHEN c.section_title ILIKE '%%Additional Analysis%%' THEN -0.1
+                        WHEN c.section_title ILIKE '%%Experimental Details%%' THEN -0.08
+                        WHEN c.section_title ILIKE '%%Implementation Details%%' THEN -0.08
+                        ELSE 0
+                    END AS section_boost
+                FROM paper_embeddings e
+                JOIN paper_chunks c ON c.id = e.chunk_id
+                JOIN papers p ON p.arxiv_id = c.arxiv_id
         """
         params: list[Any] = [self._vector_literal(query_embedding)]
         if arxiv_id:
             query += " WHERE c.arxiv_id = %s"
             params.append(arxiv_id)
-        query += " ORDER BY e.embedding <=> %s::vector ASC LIMIT %s"
-        params.extend([self._vector_literal(query_embedding), max(1, limit)])
+        query += """
+            )
+            SELECT
+                id,
+                arxiv_id,
+                title,
+                chunk_text,
+                chunk_index,
+                section_title,
+                (raw_similarity_score + content_role_adjustment + section_boost) AS similarity_score,
+                raw_similarity_score,
+                content_role
+            FROM ranked
+            WHERE content_role <> 'toc'
+            ORDER BY (raw_similarity_score + content_role_adjustment + section_boost) DESC, id DESC
+            LIMIT %s
+        """
+        params.append(max(1, limit))
 
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(query, tuple(params))
@@ -129,6 +169,8 @@ class VectorRepository:
                 "chunk_index": row[4],
                 "section_title": row[5],
                 "similarity_score": float(row[6]) if row[6] is not None else 0.0,
+                "raw_similarity_score": float(row[7]) if row[7] is not None else 0.0,
+                "content_role": row[8] or "",
             }
             for row in rows
         ]

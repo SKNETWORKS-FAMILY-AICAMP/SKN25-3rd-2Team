@@ -2,36 +2,29 @@
 
 ## 1. 문서 목적
 
-이 문서는 ArXplore 프로젝트 구성원이 개발 환경을 처음 준비할 때 따라야 하는 절차를 정리한 문서이다.
-
-서버 스택(MongoDB, PostgreSQL, Airflow)은 팀 공용 서버에서 운영되고 있으며, 각 팀원은 자신의 컴퓨터에서 `dev` 컨테이너를 기본으로 사용한다. PDF 파싱 품질 검증과 `prepare_papers` 로컬 실행이 필요할 때는 여기에 parser 컨테이너를 추가로 띄운다. 서버 접속은 Tailscale VPN을 통해 이루어진다.
+이 문서는 ArXplore 프로젝트 구성원이 로컬 개발 환경과 서버 연결 환경을 준비할 때 따라야 하는 절차를 정리한다. 현재 운영 구조는 `서버 DB + 서버 Airflow + 로컬 dev 컨테이너 + 로컬 parser + 로컬 prepare-worker`를 기준으로 한다. 즉, 서버는 수집 자동화와 저장소를 담당하고, 무거운 파싱과 임베딩은 팀원 각자의 개발용 PC에서 수행한다.
 
 ## 2. 전체 흐름
 
 ```text
-1. WSL 환경 준비 (Windows 사용자)
-2. Tailscale 설치
+1. WSL 또는 로컬 개발 환경 준비
+2. Tailscale 연결
 3. 저장소 clone
-4. .env 설정
+4. .env 배치
 5. dev 컨테이너 실행
-6. (선택) Windows 브라우저에서 Airflow/DB 접근 시 포트 포워딩
-7. (선택) 로컬 parser 컨테이너 실행
+6. parser 컨테이너 실행
+7. prepare-worker 실행
+8. 필요 시 서버 Airflow와 DB 접근을 위한 포트 포워딩
 ```
 
 ## 3. 준비 사항
 
 - Git
 - Docker Desktop 또는 Docker Engine
-- 전달받은 `.env` 파일
+- 전달받은 `.env`
 - 전달받은 Tailscale Auth Key
 
-### Docker가 설치되어 있지 않은 경우
-
-- Windows: Docker Desktop 설치 절차를 따른다.
-- macOS: Docker Desktop 또는 `brew install --cask docker`
-- Linux: 배포판에 맞는 Docker Engine 설치 절차를 따른다.
-
-설치 후 확인:
+설치 확인:
 
 ```bash
 docker --version
@@ -40,11 +33,9 @@ docker compose version
 
 ## 4. Tailscale 설치
 
-개발 컨테이너에서 서버의 DB/Airflow에 접속하려면 Tailscale이 필요하다.
+개발 컨테이너에서 서버의 MongoDB, PostgreSQL, Airflow에 접근하려면 Tailscale 연결이 필요하다.
 
 ### WSL 사용자
-
-WSL 내부에 설치한다.
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
@@ -65,7 +56,7 @@ sudo tailscale up --auth-key=<전달받은 Auth Key>
 tailscale ping 100.106.29.101
 ```
 
-`pong` 응답이 오면 서버 연결이 정상이다.
+`pong`이 오면 서버 연결이 정상이다.
 
 ## 5. 저장소 가져오기
 
@@ -76,122 +67,130 @@ cd ArXplore
 
 ## 6. `.env` 배치
 
-전달받은 `.env` 파일을 프로젝트 루트에 둔다. 서버 접속 정보, DB 계정 등은 이미 설정되어 있다.
+전달받은 `.env`를 프로젝트 루트에 둔다. 현재 `.env`에는 MongoDB, PostgreSQL, LangSmith, parser, worker가 사용할 접속 정보가 포함된다.
 
-`.env`를 수정한 뒤에는 `docker compose restart`만으로 값이 다시 주입되지 않을 수 있다. 환경 변수 변경을 반영해야 할 때는 기존 컨테이너를 재시작하는 대신 아래처럼 재생성한다.
+환경 변수 변경을 반영해야 할 때는 컨테이너를 재생성하는 편이 안전하다.
 
 ```bash
 docker compose -p arxplore_dev -f docker-compose.dev.yml up -d --force-recreate dev
 ```
 
-주요 값은 다음과 같다.
+현재 구조에서 중요한 값은 다음과 같다.
 
-- `COMPOSE_PROJECT_NAME=arxplore`
-- `LANGSMITH_PROJECT=ArXplore`
 - `MONGO_DB=arxplore_source`
 - `POSTGRES_DB=arxplore_meta`
 - `APP_POSTGRES_DB=arxplore_app`
+- `SERVER_MONGO_PORT`
+- `SERVER_POSTGRES_PORT`
+- `LAYOUT_PARSER_BASE_URL`
 
-접속 관련 값은 다음 규칙으로 유지한다.
+접속 값은 아래 규칙을 유지한다.
 
-- `MONGO_HOST`, `POSTGRES_HOST`에는 호스트만 넣는다.
-- 포트는 `SERVER_MONGO_PORT`, `SERVER_POSTGRES_PORT`에서 따로 관리한다.
-- 즉 `MONGO_HOST=100.106.29.101`, `SERVER_MONGO_PORT=17017`처럼 분리한다.
+- `MONGO_HOST`, `POSTGRES_HOST`에는 호스트만 넣는다
+- 포트는 `SERVER_MONGO_PORT`, `SERVER_POSTGRES_PORT`에서 따로 관리한다
 
-팀원 각자 수정해야 하는 항목:
+개인별로 바꿔야 하는 값은 최소한 아래다.
 
 | 항목 | 설명 |
 |------|------|
-| `LANGSMITH_TRACE_USER` | 본인 이름 또는 식별자 |
+| `LANGSMITH_TRACE_USER` | 개인 trace 식별자 |
 
 ## 7. dev 컨테이너 실행
 
 ```bash
 bash scripts/setup-dev.sh
-```
-
-정상 실행 후 확인:
-
-```bash
 docker compose -p arxplore_dev -f docker-compose.dev.yml ps
 ```
 
-- 컨테이너 이름: `arxplore-dev`
-- Jupyter: `http://127.0.0.1:18888`
-- Streamlit 포트: `18501`
+기본 컨테이너:
 
-### dev 컨테이너 접속
+- `arxplore-dev`
+
+기본 접속:
+
+- Jupyter: `http://127.0.0.1:18888`
+- Streamlit: `http://127.0.0.1:18501`
+
+dev 컨테이너 접속:
 
 ```bash
 docker compose -p arxplore_dev -f docker-compose.dev.yml exec dev bash
 ```
 
-컨테이너 안에서 할 수 있는 작업:
+이 환경에서 할 수 있는 작업:
 
 - Python 스크립트 실행
-- Jupyter 실험
-- 프롬프트 검증
+- notebook 실험
+- retrieval / prompt / chain 검증
 - Streamlit 실행
-- 테스트 및 임시 검증
+- 간단한 DB 점검
 
 ### Streamlit 실행
-
-dev 컨테이너 안에서:
 
 ```bash
 streamlit run app/main.py --server.address=0.0.0.0
 ```
 
-브라우저: `http://127.0.0.1:18501`
-
 ## 8. 로컬 parser 컨테이너 실행
 
-PDF 파싱 품질 검증과 `prepare_papers` 로컬 실행은 HURIDOCS 기반 parser 컨테이너를 함께 사용하는 것을 기준으로 한다.
+PDF 파싱 품질 검증과 실제 prepare는 HURIDOCS 기반 parser 컨테이너를 함께 쓰는 것을 기준으로 한다.
 
 ```bash
 docker compose -f docker-compose.parser.yml up -d --build
 docker logs -f arxplore-layout-parser
 ```
 
-정상 실행 후 parser는 `5060` 포트에서 응답한다. 개발 컨테이너 안에서 사용할 때는 `LAYOUT_PARSER_BASE_URL`을 이 주소로 맞춘다. 로컬 Docker 브리지 환경에서는 보통 `http://172.17.0.1:5060`을 사용한다.
+parser 컨테이너 원칙:
 
-기본 원칙은 다음과 같다.
+- 공용 서버 스택에 올리지 않는다
+- 로컬 개발용 PC에서 실행한다
+- 가능하면 GPU를 사용하고, 없으면 CPU fallback을 허용한다
+- parser가 없어도 `pypdf` fallback은 동작하지만 품질 기준은 parser 실행 상태를 기본으로 본다
 
-- parser 컨테이너는 공용 서버 스택이 아니라 로컬 개발용 PC에서 실행한다.
-- 서버는 MongoDB, PostgreSQL, Airflow 중심으로 유지한다.
-- parser는 가능하면 GPU를 사용하고, GPU가 없으면 CPU로 fallback한다.
-- parser가 없어도 `pypdf` fallback 경로는 동작하지만 품질 검증은 parser를 켠 상태를 기준으로 수행한다.
+## 9. prepare-worker 실행
 
-로컬 GPU에서 prepare를 실행할 때는 아래 워커 스크립트를 사용한다.
+현재 공식 prepare 진입점은 `scripts/prepare-worker.sh`다. 이 스크립트는 WSL 또는 로컬 쉘에서 실행하지만, 실제 Python worker는 `arxplore-dev` 컨테이너 안에서 동작한다.
+
+상시 대기 모드:
 
 ```bash
 bash scripts/prepare-worker.sh
 ```
 
-`auto` 모드는 `collect`가 PostgreSQL job queue에 넣은 날짜를 소비해 prepare를 수행하고, 성공한 `arxiv_id`에 대해 임베딩까지 이어서 실행한다. loop 모드에서는 `LISTEN/NOTIFY`로 새 작업을 기다리며, 임베딩을 잠시 끄려면 `--skip-embed`를 추가한다.
-
-1회만 실행하려면 다음 명령을 사용한다.
+1회 실행 모드:
 
 ```bash
 bash scripts/prepare-worker.sh once
 ```
 
-과거 raw를 파싱해 적재할 때만 backfill 모드를 수동으로 사용한다.
+동작 방식:
+
+- `arxplore_daily_collect`가 `prepare_jobs`에 날짜를 넣는다
+- `prepare-worker`가 새 job을 기다린다
+- job을 claim하면 `prepare -> embed`를 수행한다
+- 결과는 서버 PostgreSQL에 직접 적재된다
+
+`prepare-worker`는 auto 모드에서 `LISTEN/NOTIFY`로 대기하며, 새 작업이 없을 때는 polling보다 가벼운 형태로 쉬고 있다가 job이 생기면 거의 즉시 반응한다.
+
+### backfill prepare가 필요할 때
+
+과거 raw를 다시 파싱해 적재할 때만 backfill 모드를 수동으로 사용한다.
 
 ```bash
-docker compose -p arxplore_dev -f docker-compose.dev.yml exec dev bash -lc 'cd /workspace && python3 -m src.pipeline.prepare_worker --mode backfill --batch-days 3 --loop --sleep-seconds 120'
+docker compose -p arxplore_dev -f docker-compose.dev.yml exec dev bash -lc \
+  'cd /workspace && python3 -m src.pipeline.prepare_worker --mode backfill --batch-days 3 --loop --sleep-seconds 120'
 ```
 
-## 9. 서버 스택 실행
+## 10. 서버 스택 실행
 
-인프라, Airflow, DB, 통합 테스트 담당자는 아래 명령으로 서버 스택을 올릴 수 있다.
+서버 스택은 수집 자동화와 DB 운영을 담당한다.
 
 ```bash
 bash scripts/setup-server.sh
 docker compose -p arxplore_server -f docker-compose.server.yml ps
 ```
 
-핵심 컨테이너는 다음과 같다.
+핵심 컨테이너:
 
 - `arxplore-postgres`
 - `arxplore-mongodb`
@@ -200,34 +199,65 @@ docker compose -p arxplore_server -f docker-compose.server.yml ps
 - `arxplore-airflow-scheduler`
 - `arxplore-airflow-dag-processor`
 
-## 10. Windows 브라우저에서 서버 접근
+현재 Airflow에서 중요하게 보는 DAG는 2개다.
 
-WSL에만 Tailscale이 설치되어 있으므로, Windows 브라우저에서 Airflow 웹 UI 등을 보려면 포트 포워딩이 필요하다.
+- `arxplore_daily_collect`
+- `arxplore_maintenance`
 
-### 사전 준비
+## 11. Airflow 운영 기준
 
-`bash scripts/port-forward.sh`는 내부적으로 `ssh localhost`를 사용한다. 따라서 아래 두 줄을 먼저 실행해 로컬 SSH 서버를 켜지 않으면 `connect to host localhost port 22: Connection refused` 오류가 난다.
+현재 운영 모델은 다음과 같다.
+
+- `arxplore_daily_collect`
+  - 최신 HF Daily Papers raw 수집
+  - `prepare_jobs` enqueue
+- `arxplore_maintenance`
+  - backfill
+  - metadata enrichment
+- 로컬 `prepare-worker`
+  - prepare
+  - embed
+
+즉 서버 Airflow만 켜 둔다고 prepare와 embed가 자동으로 실행되는 구조가 아니다. 로컬 worker도 함께 떠 있어야 최신 수집분이 실제 `paper_fulltexts`, `paper_chunks`, `paper_embeddings`까지 이어진다.
+
+## 12. 적재 상태 점검
+
+적재 상태와 retrieval 결과는 아래 notebook으로 확인한다.
+
+- `notebooks/retrieval_inspection.ipynb`
+
+이 notebook에서는 다음을 점검할 수 있다.
+
+- 적재된 `papers`, `paper_fulltexts`, `paper_chunks`, `paper_embeddings` 수
+- `prepare_jobs` 최근 상태
+- 최근 적재 논문 목록
+- lexical / vector retrieval 결과
+
+운영상 가장 먼저 확인할 것은 아래 네 가지다.
+
+1. raw가 MongoDB에 들어가는지
+2. `prepare_jobs`가 생성되는지
+3. `prepare-worker`가 이를 소비하는지
+4. embedding backlog가 남아 있지 않은지
+
+## 13. Windows 브라우저에서 서버 접근
+
+WSL에만 Tailscale이 설치되어 있으면 Windows 브라우저에서 Airflow와 DB를 직접 보기 어렵다. 이 경우 `scripts/port-forward.sh`로 포트 포워딩을 사용한다.
+
+사전 준비:
 
 ```bash
 sudo apt install openssh-server -y
 sudo service ssh start
 ```
 
-### 포트 포워딩 실행
-
-순서는 반드시 아래와 같이 진행한다.
-
-1. `openssh-server` 설치
-2. `ssh` 서비스 시작
-3. `bash scripts/port-forward.sh` 실행
+그 다음 실행:
 
 ```bash
-sudo apt install openssh-server -y
-sudo service ssh start
 bash scripts/port-forward.sh
 ```
 
-중복 실행이나 포트 충돌 시에는 아래 제어 명령을 사용한다.
+제어 명령:
 
 ```bash
 bash scripts/port-forward.sh status
@@ -235,7 +265,7 @@ bash scripts/port-forward.sh stop
 bash scripts/port-forward.sh restart
 ```
 
-포워딩되는 주소:
+포워딩 주소:
 
 | 서비스 | Windows 브라우저 주소 |
 |--------|----------------------|
@@ -243,23 +273,9 @@ bash scripts/port-forward.sh restart
 | PostgreSQL | `127.0.0.1:15432` |
 | MongoDB | `127.0.0.1:17017` |
 
-MongoDB Compass에서는 아래 연결 문자열 형식을 권장한다.
+## 14. 접속 정보 요약
 
-```text
-mongodb://<MONGO_INITDB_ROOT_USERNAME>:<MONGO_INITDB_ROOT_PASSWORD>@127.0.0.1:17017/?authSource=admin&directConnection=true
-```
-
-연결이 되지 않으면 먼저 다음 상태를 다시 확인한다.
-
-- `sudo apt install openssh-server -y`를 한 번도 하지 않았는지
-- WSL에서 `sudo service ssh start`가 실행 중인지
-- `ssh localhost`가 정상 응답하는지
-- `bash scripts/port-forward.sh`가 종료되지 않고 유지되고 있는지
-- Compass에서 `127.0.0.1:17017`와 `authSource=admin`을 사용하고 있는지
-
-## 11. 접속 정보 요약
-
-### dev 컨테이너 / 코드에서
+### dev 컨테이너 / 코드 기준
 
 | 서비스 | 주소 |
 |--------|------|
@@ -268,7 +284,7 @@ mongodb://<MONGO_INITDB_ROOT_USERNAME>:<MONGO_INITDB_ROOT_PASSWORD>@127.0.0.1:17
 | Airflow API | `http://100.106.29.101:18080` |
 | Layout Parser | `http://172.17.0.1:5060` 또는 로컬 parser 주소 |
 
-### Windows 브라우저 / DB 클라이언트에서
+### Windows 브라우저 / DB 클라이언트 기준
 
 | 서비스 | 주소 |
 |--------|------|
@@ -276,9 +292,9 @@ mongodb://<MONGO_INITDB_ROOT_USERNAME>:<MONGO_INITDB_ROOT_PASSWORD>@127.0.0.1:17
 | PostgreSQL | `127.0.0.1:15432` |
 | MongoDB | `127.0.0.1:17017` |
 
-## 12. LangSmith 설정
+## 15. LangSmith 설정
 
-LangSmith는 별도 컨테이너 없이 Python 실행 환경에서 사용한다. 공용 API 키는 `.env`에 이미 설정되어 있으므로, 각자 `LANGSMITH_TRACE_USER`에 본인 이름만 넣으면 된다.
+LangSmith는 별도 컨테이너 없이 Python 실행 환경에서 사용한다. 공용 프로젝트 이름은 유지하고, 각자 `LANGSMITH_TRACE_USER`만 개인 식별자로 맞춘다.
 
 ```env
 LANGSMITH_TRACE_USER=홍길동

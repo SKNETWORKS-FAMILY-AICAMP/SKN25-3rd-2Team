@@ -5,6 +5,7 @@ PROJECT_NAME="${PROJECT_NAME:-arxplore_dev}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.dev.yml}"
 MAX_JOBS_PER_RUN="${MAX_JOBS_PER_RUN:-1}"
 EMBED_MAX_CHUNKS="${EMBED_MAX_CHUNKS:-200}"
+EMBED_BACKLOG_MAX_CHUNKS="${EMBED_BACKLOG_MAX_CHUNKS:-400}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-120}"
 WAIT_TIMEOUT_SECONDS="${WAIT_TIMEOUT_SECONDS:-120}"
 RUN_MODE="${1:-loop}"
@@ -33,8 +34,8 @@ if [[ "${RUN_MODE}" != "loop" && "${RUN_MODE}" != "once" ]]; then
   exit 1
 fi
 
-echo "[prepare-auto] mode=${RUN_MODE} project=${PROJECT_NAME} compose=${COMPOSE_FILE}"
-echo "[prepare-auto] max_jobs_per_run=${MAX_JOBS_PER_RUN} embed_max_chunks=${EMBED_MAX_CHUNKS} wait_timeout_seconds=${WAIT_TIMEOUT_SECONDS}"
+echo "[prepare-worker] mode=${RUN_MODE} project=${PROJECT_NAME} compose=${COMPOSE_FILE}"
+echo "[prepare-worker] max_jobs_per_run=${MAX_JOBS_PER_RUN} embed_max_chunks=${EMBED_MAX_CHUNKS} embed_backlog_max_chunks=${EMBED_BACKLOG_MAX_CHUNKS} wait_timeout_seconds=${WAIT_TIMEOUT_SECONDS}"
 
 docker compose -p "${PROJECT_NAME}" -f "${COMPOSE_FILE}" exec dev bash -lc \
-  "cd /workspace && python3 -m src.pipeline.prepare_worker --mode auto --max-jobs-per-run ${MAX_JOBS_PER_RUN} --embed-max-chunks ${EMBED_MAX_CHUNKS} ${LOOP_ARGS} ${EXTRA_ARGS[*]:-}"
+  "cd /workspace && python3 -m src.pipeline.prepare_worker --mode auto --max-jobs-per-run ${MAX_JOBS_PER_RUN} --embed-max-chunks ${EMBED_MAX_CHUNKS} --embed-backlog-max-chunks ${EMBED_BACKLOG_MAX_CHUNKS} ${LOOP_ARGS} ${EXTRA_ARGS[*]:-}"

@@ -84,6 +84,7 @@ class PrepareJobRepository:
         worker_id: str = "local_prepare_worker",
     ) -> dict[str, Any] | None:
         """대기 중인 prepare 작업 1건을 선점한다"""
+        self.reset_stale_prepare_jobs(mode=mode)
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -138,6 +139,44 @@ class PrepareJobRepository:
             "claimed_at": row[9],
             "updated_at": row[10],
         }
+
+    def reset_stale_prepare_jobs(
+        self,
+        *,
+        mode: str = "auto",
+        stale_seconds: int | None = None,
+    ) -> int:
+        """오래 멈춘 processing 작업을 다시 pending으로 되돌린다"""
+        normalized_stale_seconds = int(
+            stale_seconds if stale_seconds is not None else self.settings.prepare_job_stale_seconds
+        )
+        if normalized_stale_seconds <= 0:
+            return 0
+
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE prepare_jobs
+                SET
+                    status = 'pending',
+                    worker_id = NULL,
+                    error = NULL,
+                    claimed_at = NULL,
+                    finished_at = NULL,
+                    updated_at = NOW()
+                WHERE mode = %s
+                  AND status = 'processing'
+                  AND claimed_at IS NOT NULL
+                  AND claimed_at < NOW() - (%s * INTERVAL '1 second')
+                RETURNING target_date
+                """,
+                (mode, normalized_stale_seconds),
+            )
+            reset_dates = [str(row[0]) for row in cursor.fetchall()]
+            for target_date in reset_dates:
+                cursor.execute("SELECT pg_notify(%s, %s)", (self.channel_name, f"{mode}:{target_date}"))
+
+        return len(reset_dates)
 
     def complete_prepare_job(
         self,

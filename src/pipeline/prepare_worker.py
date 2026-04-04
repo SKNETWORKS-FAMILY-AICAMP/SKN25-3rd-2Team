@@ -42,6 +42,7 @@ def _run_embed_after_prepare(
     *,
     prepare_result: dict[str, Any],
     embed_max_chunks: int,
+    embed_backlog_max_chunks: int,
 ) -> dict[str, Any]:
     arxiv_ids = _collect_prepared_arxiv_ids(prepare_result)
     if not arxiv_ids:
@@ -52,6 +53,8 @@ def _run_embed_after_prepare(
             "embedded_arxiv_count": 0,
             "selected_chunk_count": 0,
             "embedded_chunk_count": 0,
+            "backlog_selected_chunk_count": 0,
+            "backlog_embedded_chunk_count": 0,
             "failures": [],
         }
 
@@ -60,6 +63,8 @@ def _run_embed_after_prepare(
     total_selected = 0
     total_embedded = 0
     embedded_arxiv_count = 0
+    backlog_selected_total = 0
+    backlog_embedded_total = 0
 
     for arxiv_id in arxiv_ids:
         selected_sum = 0
@@ -109,6 +114,29 @@ def _run_embed_after_prepare(
     else:
         status = "success"
 
+    normalized_backlog_max_chunks = max(0, int(embed_backlog_max_chunks))
+    if normalized_backlog_max_chunks > 0:
+        remaining_backlog_budget = normalized_backlog_max_chunks
+        while remaining_backlog_budget > 0:
+            current_limit = min(embed_max_chunks, remaining_backlog_budget)
+            backlog_result = run_embed_papers(
+                runtime="local",
+                user="local_prepare_worker",
+                max_chunks=current_limit,
+                arxiv_id=None,
+            )
+            backlog_status = str(backlog_result.get("status") or "")
+            backlog_selected = int(backlog_result.get("selected_chunk_count", 0) or 0)
+            backlog_embedded = int(backlog_result.get("embedded_chunk_count", 0) or 0)
+            backlog_selected_total += backlog_selected
+            backlog_embedded_total += backlog_embedded
+
+            if backlog_status == "no_op" or backlog_selected <= 0 or backlog_embedded <= 0:
+                break
+            if backlog_selected < current_limit:
+                break
+            remaining_backlog_budget -= backlog_selected
+
     return {
         "stage": "embed_after_prepare",
         "status": status,
@@ -116,6 +144,8 @@ def _run_embed_after_prepare(
         "embedded_arxiv_count": embedded_arxiv_count,
         "selected_chunk_count": total_selected,
         "embedded_chunk_count": total_embedded,
+        "backlog_selected_chunk_count": backlog_selected_total,
+        "backlog_embedded_chunk_count": backlog_embedded_total,
         "per_arxiv": per_arxiv,
         "failures": failures,
     }
@@ -125,6 +155,7 @@ def _run_once(args: argparse.Namespace) -> dict[str, Any]:
     normalized_worker_id = (args.worker_id or args.state_name or "").strip() or "default"
     normalized_max_papers = (args.max_papers or "").strip() or None
     normalized_embed_max_chunks = _normalize_optional_positive_int(args.embed_max_chunks, default=200)
+    normalized_embed_backlog_max_chunks = _normalize_optional_positive_int(args.embed_backlog_max_chunks, default=0)
 
     if args.mode == "auto":
         prepare_result = run_consume_prepare_queue(
@@ -146,6 +177,7 @@ def _run_once(args: argparse.Namespace) -> dict[str, Any]:
         embed_result = _run_embed_after_prepare(
             prepare_result=prepare_result,
             embed_max_chunks=normalized_embed_max_chunks,
+            embed_backlog_max_chunks=normalized_embed_backlog_max_chunks,
         )
         prepare_result["embed"] = embed_result
 
@@ -186,6 +218,12 @@ def main() -> int:
         type=int,
         default=200,
         help="auto 모드에서 arXiv별 임베딩 배치 크기. 기본값은 200이다.",
+    )
+    parser.add_argument(
+        "--embed-backlog-max-chunks",
+        type=int,
+        default=0,
+        help="auto 모드에서 신규 논문 처리 뒤 추가로 태울 backlog 임베딩 최대 청크 수. 기본값은 0이다.",
     )
     parser.add_argument(
         "--skip-embed",
