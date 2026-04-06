@@ -19,3 +19,6 @@ data/postgres/
 .idea/
 .DS_Store
 Thumbs.db
+
+tests/
+prepare_*.log

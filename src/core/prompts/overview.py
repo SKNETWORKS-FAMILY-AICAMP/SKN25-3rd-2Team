@@ -1,4 +1,4 @@
-"""토픽 개요 생성 프롬프트."""
+"""토픽 개요 프롬프트를 담당하는 모듈"""
 
 from langchain_core.prompts import ChatPromptTemplate
 

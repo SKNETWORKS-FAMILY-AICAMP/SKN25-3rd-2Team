@@ -1,4 +1,4 @@
-"""논문 원본 응답 저장 계층 구현."""
+"""논문 원본 응답 저장과 조회를 담당하는 모듈"""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ class RawPaperStore:
             raise ModuleNotFoundError("pymongo가 설치되어 있지 않아 RawPaperStore를 초기화할 수 없습니다.")
         self.client = MongoClient(self._build_mongo_uri())
         self._ensure_collection_indexes()
+        self._ensure_state_indexes()
 
     def save_daily_papers_response(
         self,
@@ -70,8 +71,73 @@ class RawPaperStore:
             return [payload]
         return []
 
+    def has_daily_papers_response(self, *, date: str) -> bool:
+        """특정 날짜의 HF Daily Papers 원본이 이미 저장돼 있는지 확인한다."""
+        collection = self._collection()
+        return collection.count_documents({"source": "hf_daily_papers", "date": date}, limit=1) > 0
+
+    def list_daily_papers_dates(
+        self,
+        *,
+        date_gt: str | None = None,
+        date_gte: str | None = None,
+        date_lte: str | None = None,
+        limit: int | None = None,
+        ascending: bool = True,
+    ) -> list[str]:
+        """조건에 맞는 HF Daily Papers raw 날짜 목록을 정렬해 조회한다."""
+        collection = self._collection()
+        date_filter: dict[str, Any] = {}
+        if date_gt:
+            date_filter["$gt"] = date_gt
+        if date_gte:
+            date_filter["$gte"] = date_gte
+        if date_lte:
+            date_filter["$lte"] = date_lte
+
+        query: dict[str, Any] = {"source": "hf_daily_papers"}
+        if date_filter:
+            query["date"] = date_filter
+
+        cursor = collection.find(query, {"_id": 0, "date": 1}).sort("date", 1 if ascending else -1)
+        if isinstance(limit, int) and limit > 0:
+            cursor = cursor.limit(limit)
+        return [str(item.get("date")) for item in cursor if item.get("date")]
+
+    def load_pipeline_state(self, *, pipeline: str, name: str = "default") -> dict[str, Any] | None:
+        """파이프라인 진행 상태 문서를 읽는다."""
+        collection = self._state_collection()
+        document = collection.find_one({"pipeline": pipeline, "name": name}, {"_id": 0})
+        if document is None:
+            return None
+        return document
+
+    def save_pipeline_state(
+        self,
+        *,
+        pipeline: str,
+        state: dict[str, Any],
+        name: str = "default",
+    ) -> None:
+        """파이프라인 진행 상태 문서를 저장한다."""
+        collection = self._state_collection()
+        document = {
+            "pipeline": pipeline,
+            "name": name,
+            **state,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        collection.replace_one(
+            {"pipeline": pipeline, "name": name},
+            document,
+            upsert=True,
+        )
+
     def _collection(self) -> Any:
         return self.client[self.settings.mongo_db][self.settings.mongo_daily_papers_collection]
+
+    def _state_collection(self) -> Any:
+        return self.client[self.settings.mongo_db][self.settings.mongo_pipeline_state_collection]
 
     def _ensure_collection_indexes(self) -> None:
         collection = self._collection()
@@ -105,6 +171,14 @@ class RawPaperStore:
         collection.create_index(
             [("source", 1), ("collected_at", -1)],
             name="idx_source_collected_at",
+        )
+
+    def _ensure_state_indexes(self) -> None:
+        collection = self._state_collection()
+        collection.create_index(
+            [("pipeline", 1), ("name", 1)],
+            unique=True,
+            name="uq_pipeline_name",
         )
 
     def _build_mongo_uri(self) -> str:

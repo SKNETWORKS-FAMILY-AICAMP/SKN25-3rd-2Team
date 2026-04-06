@@ -1,3 +1,5 @@
+"""ArXplore Streamlit 메인 화면 진입을 담당하는 모듈"""
+
 from __future__ import annotations
 
 from datetime import datetime

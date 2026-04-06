@@ -1,3 +1,5 @@
+"""파이프라인 실행 단계의 LangSmith trace 구성을 생성하는 모듈"""
+
 from typing import Any, Dict, Optional
 
 from src.shared import build_langsmith_trace_context

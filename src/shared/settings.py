@@ -1,3 +1,5 @@
+"""프로젝트 전역 환경설정 로딩과 연결 정보 해석을 담당하는 모듈"""
+
 from functools import lru_cache
 from typing import Optional
 from urllib.parse import urlsplit
@@ -16,9 +18,16 @@ class AppSettings(BaseSettings):
     hf_request_timeout_seconds: int = Field(default=20, alias="HF_REQUEST_TIMEOUT_SECONDS")
 
     arxiv_api_base_url: str = Field(default="https://export.arxiv.org/api/query", alias="ARXIV_API_BASE_URL")
-    arxiv_request_timeout_seconds: int = Field(default=20, alias="ARXIV_REQUEST_TIMEOUT_SECONDS")
+    arxiv_request_timeout_seconds: int = Field(default=45, alias="ARXIV_REQUEST_TIMEOUT_SECONDS")
     arxiv_request_batch_size: int = Field(default=25, alias="ARXIV_REQUEST_BATCH_SIZE")
     arxiv_request_delay_seconds: float = Field(default=3.0, alias="ARXIV_REQUEST_DELAY_SECONDS")
+    layout_parser_base_url: Optional[str] = Field(default=None, alias="LAYOUT_PARSER_BASE_URL")
+    layout_parser_timeout_seconds: int = Field(default=600, alias="LAYOUT_PARSER_TIMEOUT_SECONDS")
+    layout_parser_fast: bool = Field(default=False, alias="LAYOUT_PARSER_FAST")
+    layout_parser_parse_tables_and_math: bool = Field(
+        default=True,
+        alias="LAYOUT_PARSER_PARSE_TABLES_AND_MATH",
+    )
 
     mongo_host: Optional[str] = Field(default=None, alias="MONGO_HOST")
     server_mongo_port: int = Field(default=27017, alias="SERVER_MONGO_PORT")
@@ -26,6 +35,7 @@ class AppSettings(BaseSettings):
     mongo_initdb_root_username: Optional[str] = Field(default=None, alias="MONGO_INITDB_ROOT_USERNAME")
     mongo_initdb_root_password: Optional[str] = Field(default=None, alias="MONGO_INITDB_ROOT_PASSWORD")
     mongo_daily_papers_collection: str = Field(default="daily_papers_raw", alias="MONGO_DAILY_PAPERS_COLLECTION")
+    mongo_pipeline_state_collection: str = Field(default="pipeline_state", alias="MONGO_PIPELINE_STATE_COLLECTION")
 
     postgres_host: Optional[str] = Field(default=None, alias="POSTGRES_HOST")
     server_postgres_port: int = Field(default=5432, alias="SERVER_POSTGRES_PORT")
@@ -33,6 +43,7 @@ class AppSettings(BaseSettings):
     app_postgres_db: Optional[str] = Field(default=None, alias="APP_POSTGRES_DB")
     postgres_user: Optional[str] = Field(default=None, alias="POSTGRES_USER")
     postgres_password: Optional[str] = Field(default=None, alias="POSTGRES_PASSWORD")
+    prepare_job_stale_seconds: int = Field(default=900, alias="PREPARE_JOB_STALE_SECONDS")
 
     langsmith_api_key: Optional[str] = Field(default=None, alias="LANGSMITH_API_KEY")
     langsmith_project: str = Field(default="ArXplore", alias="LANGSMITH_PROJECT")
@@ -42,7 +53,9 @@ class AppSettings(BaseSettings):
 
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o", alias="OPENAI_MODEL")
-    openai_embedding_model: str = Field(default="text-embedding-3-small", alias="OPENAI_EMBEDDING_MODEL")
+    openai_embedding_model: str = Field(default="text-embedding-3-large", alias="OPENAI_EMBEDDING_MODEL")
+    openai_embedding_dimensions: int = Field(default=1536, alias="OPENAI_EMBEDDING_DIMENSIONS")
+    embedding_batch_size: int = Field(default=64, alias="EMBEDDING_BATCH_SIZE")
 
 
 def resolve_host_and_port(host: str, default_port: int) -> tuple[str, int]:

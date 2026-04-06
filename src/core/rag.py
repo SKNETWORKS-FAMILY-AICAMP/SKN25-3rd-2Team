@@ -1,4 +1,4 @@
-"""RAG 응답 체인 뼈대."""
+"""RAG 응답 체인의 기본 뼈대를 담당하는 모듈"""
 
 from __future__ import annotations
 from typing import Any, Optional

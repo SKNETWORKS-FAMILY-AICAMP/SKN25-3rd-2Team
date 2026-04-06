@@ -1,3 +1,5 @@
+"""토픽 상세 페이지 렌더링을 담당하는 모듈"""
+
 from __future__ import annotations
 
 import streamlit as st
