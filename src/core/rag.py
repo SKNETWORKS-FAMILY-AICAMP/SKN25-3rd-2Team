@@ -7,9 +7,7 @@ from typing import Any, Optional
 from .models import TopicDocument
 
 
-def answer_question(
-    question: str,
-    *,
+def answer_question(question: str,*,
     context_papers: list[dict[str, Any]],
     context_documents: list[TopicDocument],
     runtime: str = "dev",
