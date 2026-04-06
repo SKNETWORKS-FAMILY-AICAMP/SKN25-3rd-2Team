@@ -243,7 +243,6 @@ answer payload는 최소한 아래 정보를 포함해야 한다.
 - 필요 시 추가
   - `src/core/prompts/translation.py`
   - `src/core/prompts/detailed_summary.py`
-  - `src/core/prompt_rules.py`
 
 #### 책임 범위
 

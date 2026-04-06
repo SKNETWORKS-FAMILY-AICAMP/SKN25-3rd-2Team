@@ -16,7 +16,7 @@ from src.shared import get_settings
 
 from .models import PaperRef, RelatedTopic, TopicDocument
 from .prompts import KEY_FINDINGS_PROMPT, OVERVIEW_PROMPT
-from .tracing import build_analysis_trace_config
+from .tracing import build_analysis_trace_config, build_overview_trace_config, build_key_findings_trace_config
 
 
 def _build_llm() -> ChatOpenAI:

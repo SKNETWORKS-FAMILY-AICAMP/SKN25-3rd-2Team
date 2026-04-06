@@ -51,3 +51,17 @@ class TopicDocument(BaseModel):
     papers: list[PaperRef] = Field(default_factory=list)
     related_topics: list[RelatedTopic] = Field(default_factory=list)
     generated_at: datetime
+
+
+class PaperDetailDocument(BaseModel):
+    """단일 논문 상세 문서 계약.
+
+    TopicDocument와 별도로 유지되는 단일 논문 설명용 문서 타입입니다.
+    토픽 문서와 목적이 다르므로 상호 대체하지 않고 분리해서 사용합니다.
+    """
+
+    arxiv_id: str
+    title: str
+    overview: str
+    key_findings: list[str] = Field(default_factory=list)
+    generated_at: datetime

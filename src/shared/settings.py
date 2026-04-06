@@ -1,10 +1,12 @@
 """프로젝트 전역 환경설정 로딩과 연결 정보 해석을 담당하는 모듈"""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
-from pydantic import Field
+from dotenv import dotenv_values
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +58,33 @@ class AppSettings(BaseSettings):
     openai_embedding_model: str = Field(default="text-embedding-3-large", alias="OPENAI_EMBEDDING_MODEL")
     openai_embedding_dimensions: int = Field(default=1536, alias="OPENAI_EMBEDDING_DIMENSIONS")
     embedding_batch_size: int = Field(default=64, alias="EMBEDDING_BATCH_SIZE")
+
+    @model_validator(mode="after")
+    def _restore_empty_sensitive_values_from_env_file(self) -> "AppSettings":
+        env_path = Path(".env")
+        if not env_path.exists():
+            return self
+
+        env_values = dotenv_values(env_path)
+        fallback_fields = {
+            "openai_api_key": "OPENAI_API_KEY",
+            "langsmith_api_key": "LANGSMITH_API_KEY",
+        }
+
+        for field_name, env_name in fallback_fields.items():
+            current_value = getattr(self, field_name)
+            if current_value is not None and str(current_value).strip():
+                continue
+
+            env_file_value = env_values.get(env_name)
+            if env_file_value is None:
+                continue
+
+            normalized_value = str(env_file_value).strip()
+            if normalized_value:
+                setattr(self, field_name, normalized_value)
+
+        return self
 
 
 def resolve_host_and_port(host: str, default_port: int) -> tuple[str, int]:

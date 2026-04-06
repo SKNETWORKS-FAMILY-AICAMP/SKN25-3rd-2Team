@@ -22,3 +22,9 @@ Thumbs.db
 
 tests/
 prepare_*.log
+test_streamlit.py
+
+# Local playground / ad-hoc test files
+20260406.ipynb
+app/paper_detail_playground.py
+app/topic_document_playground.py
