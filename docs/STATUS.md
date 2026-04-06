@@ -89,14 +89,15 @@
 |------|-------------|--------|
 | lexical (FTS) | O | `paper_retriever.search_paper_contexts()` |
 | vector | O | `paper_retriever.search_paper_contexts_by_vector()` |
+| hybrid | O | `paper_retriever.search_paper_contexts_by_hybrid()` |
 
 lexical은 4층 스코어링(FTS + ILIKE + content_role + section_boost)을 포함한다.
 vector는 cosine similarity + content_role/section 조정 + Python rerank(lexical overlap, query intent)를 포함한다.
-두 경로 모두 adjacency_window로 주변 chunk를 묶어 context_text를 구성한다.
+hybrid는 lexical/vector 후보를 reciprocal rank fusion으로 결합하고, 동일 chunk 중복을 제거한다.
+세 경로 모두 adjacency_window로 주변 chunk를 묶어 context_text를 구성한다.
 
 ### 아직 없는 것
 
-- **hybrid retrieval**: lexical + vector 결합 (각각 독립 동작 중)
 - **query rewrite**: 원문 그대로 검색
 - **검색 실패 fallback**: 결과 부족 시 대응 정책 없음
 
@@ -105,13 +106,12 @@ vector는 cosine similarity + content_role/section 조정 + Python rerank(lexica
 ### 경로 A: retrieval → RAG answer → UI
 
 ```
-[완료] lexical/vector retrieval (cross-paper 지원)
-  → [미구현] hybrid retrieval (lexical + vector 결합)
+[완료] lexical/vector/hybrid retrieval (cross-paper 지원)
   → [스캐폴드] rag.py answer_question()
   → [데모] app/main.py 검색 UI
 ```
 
-hybrid 없이도 lexical 또는 vector 단독으로 RAG answer 구현을 시작할 수 있다.
+현재는 lexical, vector, hybrid 중 하나를 골라 RAG answer 구현을 시작할 수 있다.
 
 ### 경로 B: clustering → TopicDocument → UI 카드
 

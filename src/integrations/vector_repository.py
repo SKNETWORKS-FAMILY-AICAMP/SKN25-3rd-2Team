@@ -102,6 +102,7 @@ class VectorRepository:
                     c.id,
                     c.arxiv_id,
                     p.title,
+                    p.abstract,
                     c.chunk_text,
                     c.chunk_index,
                     c.section_title,
@@ -143,12 +144,15 @@ class VectorRepository:
                 id,
                 arxiv_id,
                 title,
+                abstract,
                 chunk_text,
                 chunk_index,
                 section_title,
                 (raw_similarity_score + content_role_adjustment + section_boost) AS similarity_score,
                 raw_similarity_score,
-                content_role
+                content_role,
+                content_role_adjustment,
+                section_boost
             FROM ranked
             WHERE content_role <> 'toc'
             ORDER BY (raw_similarity_score + content_role_adjustment + section_boost) DESC, id DESC
@@ -165,12 +169,20 @@ class VectorRepository:
                 "chunk_id": row[0],
                 "arxiv_id": row[1],
                 "paper_title": row[2],
-                "chunk_text": row[3] or "",
-                "chunk_index": row[4],
-                "section_title": row[5],
-                "similarity_score": float(row[6]) if row[6] is not None else 0.0,
-                "raw_similarity_score": float(row[7]) if row[7] is not None else 0.0,
-                "content_role": row[8] or "",
+                "paper_abstract": row[3] or "",
+                "chunk_text": row[4] or "",
+                "chunk_index": row[5],
+                "section_title": row[6],
+                "score": float(row[7]) if row[7] is not None else 0.0,
+                "similarity_score": float(row[7]) if row[7] is not None else 0.0,
+                "raw_similarity_score": float(row[8]) if row[8] is not None else 0.0,
+                "content_role": row[9] or "",
+                "retrieval_method": "vector",
+                "score_breakdown": {
+                    "raw_similarity_score": float(row[8]) if row[8] is not None else 0.0,
+                    "content_role_adjustment": float(row[10]) if row[10] is not None else 0.0,
+                    "section_boost": float(row[11]) if row[11] is not None else 0.0,
+                },
             }
             for row in rows
         ]

@@ -406,6 +406,7 @@ class PaperRepository:
                         c.chunk_text,
                         c.chunk_index,
                         c.section_title,
+                        COALESCE(c.metadata->>'content_role', '') AS content_role,
                         (
                             ts_rank_cd(
                                 setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
@@ -486,6 +487,12 @@ class PaperRepository:
                     chunk_text,
                     chunk_index,
                     section_title,
+                    content_role,
+                    fts_score,
+                    ilike_bonus,
+                    content_role_adjustment,
+                    section_boost,
+                    structural_adjustment,
                     (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) AS score
                 FROM ranked
                 WHERE (fts_score + ilike_bonus + content_role_adjustment + section_boost + structural_adjustment) > 0.01
@@ -519,7 +526,17 @@ class PaperRepository:
                 "chunk_text": row[4],
                 "chunk_index": row[5],
                 "section_title": row[6],
-                "similarity_score": float(row[7]) if row[7] is not None else 0.0,
+                "content_role": row[7] or "",
+                "score": float(row[13]) if row[13] is not None else 0.0,
+                "similarity_score": float(row[13]) if row[13] is not None else 0.0,
+                "retrieval_method": "lexical",
+                "score_breakdown": {
+                    "fts_score": float(row[8]) if row[8] is not None else 0.0,
+                    "ilike_bonus": float(row[9]) if row[9] is not None else 0.0,
+                    "content_role_adjustment": float(row[10]) if row[10] is not None else 0.0,
+                    "section_boost": float(row[11]) if row[11] is not None else 0.0,
+                    "structural_adjustment": float(row[12]) if row[12] is not None else 0.0,
+                },
                 "snippet": self._build_search_snippet(
                     normalized_query,
                     chunk_text=row[4] or "",
