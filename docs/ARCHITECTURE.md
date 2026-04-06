@@ -2,9 +2,9 @@
 
 ## 1. 문서 목적
 
-이 문서는 ArXplore의 현재 운영 구조와 모듈 경계를 코드 기준으로 설명한다. 목표 구조를 추상적으로 제시하는 것이 아니라, 이미 구현된 수집, 파싱, 적재, 임베딩 기반 위에 retrieval, answer chain, topic document, UI가 어떤 식으로 연결되는지를 정리하는 데 목적이 있다.
+이 문서는 ArXplore의 현재 운영 구조와 모듈 경계를 코드 기준으로 설명한다. 목표 구조를 추상적으로 제시하는 것이 아니라, 이미 구현된 수집, 파싱, 적재, 임베딩 기반 위에 retrieval, answer chain, 논문 상세 문서, UI가 어떤 식으로 연결되는지를 정리하는 데 목적이 있다.
 
-현재 ArXplore는 `최신 AI 논문 수집 -> raw 저장 -> prepare queue 등록 -> 로컬 prepare/embedding -> retrieval -> topic document / RAG answer -> UI` 흐름을 기준으로 한다. 이때 수집 자동화와 무거운 파싱/임베딩 실행은 같은 런타임에 있지 않다. 서버는 Airflow와 데이터 저장소를 운영하고, 로컬 개발용 PC는 parser와 prepare worker를 실행하는 역할을 맡는다.
+현재 ArXplore는 `최신 AI 논문 수집 -> raw 저장 -> prepare queue 등록 -> 로컬 prepare/embedding -> retrieval -> 논문 상세 문서 / RAG answer -> UI` 흐름을 기준으로 한다. 이때 수집 자동화와 무거운 파싱/임베딩 실행은 같은 런타임에 있지 않다. 서버는 Airflow와 데이터 저장소를 운영하고, 로컬 개발용 PC는 parser와 prepare worker를 실행하는 역할을 맡는다.
 
 ## 2. 시스템 전경
 
@@ -23,9 +23,9 @@ flowchart TD
     H --> I[embed_papers<br/>paper_embeddings 적재]
     B --> J[arxplore_maintenance<br/>backfill -> enrich]
     J --> K[arXiv metadata enrichment]
-    K --> L[PostgreSQL + pgvector<br/>papers / fulltexts / chunks / embeddings / topics / documents]
+    K --> L[PostgreSQL + pgvector<br/>papers / fulltexts / chunks / embeddings]
     L --> M[Retrieval<br/>lexical / vector / hybrid / rerank]
-    L --> N[Topic Document Generation]
+    L --> N[Paper Detail Generation<br/>overview / key_findings / detailed_summary / translation]
     M --> O[RAG Answer Chain]
     N --> P[Streamlit UI]
     O --> P
@@ -80,7 +80,7 @@ PDF 파싱은 `docker-compose.parser.yml`의 HURIDOCS 기반 컨테이너를 사
 flowchart TD
     Shared[src/shared<br/>settings / langsmith] --> Integrations[src/integrations<br/>외부 연동 / 저장소 / retrieval]
     Shared --> Core[src/core<br/>models / prompts / chains / rag / tracing]
-    Integrations --> Pipeline[src/pipeline<br/>collect / prepare / embed / analyze / worker]
+    Integrations --> Pipeline[src/pipeline<br/>collect / prepare / embed / worker]
     Pipeline --> Dags[dags<br/>daily_collect / maintenance]
     Core --> UI[app<br/>Streamlit UI]
     Integrations --> UI
@@ -112,8 +112,6 @@ flowchart TD
   - `paper_embeddings` 저장과 vector retrieval
 - `paper_retriever.py`
   - lexical, vector, hybrid 계층을 합치는 retrieval 인터페이스
-- `topic_repository.py`
-  - topic, topic document 저장 경로
 
 ### `src/pipeline`
 
@@ -127,8 +125,6 @@ Airflow와 worker가 호출하는 실행 진입점 계층이다.
   - raw payload 로드, parser 호출, chunk 생성, PostgreSQL 적재
 - `embed_papers.py`
   - 청크 임베딩과 vector 적재
-- `analyze_topics.py`
-  - topic document 생성 진입점
 - `prepare_worker.py`
   - auto/backfill 모드 prepare worker
 
@@ -137,11 +133,16 @@ Airflow와 worker가 호출하는 실행 진입점 계층이다.
 도메인 계약과 생성 계층을 담당한다.
 
 - `models.py`
-  - `TopicDocument`, `PaperRef`, `RelatedTopic`
+  - `PaperRef`, `PaperDetailDocument`
 - `prompts/`
-  - overview, key findings 등 생성 프롬프트
-- `chains.py`
-  - topic document 생성 chain
+  - `overview.py`: 논문 overview 프롬프트
+  - `key_findings.py`: 논문 핵심 포인트 프롬프트
+  - `detailed_summary.py`: 상세 요약 프롬프트
+  - `translation.py`: 근거 chunk 번역 프롬프트
+- `paper_chains.py`
+  - 논문 상세 문서 생성 chain
+- `translation_chains.py`
+  - 상세 요약 및 번역 chain
 - `rag.py`
   - retrieval 결과를 answer로 바꾸는 응답 계층
 - `tracing.py`
@@ -158,12 +159,10 @@ Airflow가 파싱하는 DAG 정의만 둔다.
 
 Streamlit UI 계층이다.
 
-- `app/main.py`
-- `app/components/topic_card.py`
-- `app/components/section_renderer.py`
-- `app/pages/topic_detail.py`
+- `app/main.py`: 메인 화면 플레이스홀더
+- `app/paper_detail_demo.py`: 논문 상세 데모 (overview / key findings / detailed summary / translation 검증)
 
-UI는 retrieval과 topic document를 소비하는 계층이며, 저장 구조나 외부 연동 코드를 직접 구현하는 위치가 아니다.
+UI는 retrieval과 논문 상세 문서를 소비하는 계층이며, 저장 구조나 외부 연동 코드를 직접 구현하는 위치가 아니다.
 
 ## 5. 데이터 흐름
 
@@ -181,8 +180,8 @@ UI는 retrieval과 topic document를 소비하는 계층이며, 저장 구조나
 10. `embed_papers`가 `paper_embeddings`를 채운다
 11. `arxplore_maintenance`는 과거 raw 백필과 메타데이터 후속 보강을 수행한다
 12. retrieval 계층이 `paper_chunks`, `paper_embeddings`를 사용해 검색 결과를 만든다
-13. topic document 생성과 answer chain이 이 데이터를 소비한다
-14. Streamlit UI가 topic document와 answer payload를 렌더링한다
+13. 논문 상세 문서 생성과 answer chain이 이 데이터를 소비한다
+14. Streamlit UI가 논문 상세 문서와 answer payload를 렌더링한다
 
 이 흐름에서 raw payload는 MongoDB가 source of truth 역할을 하고, PostgreSQL 정제층은 재생성 가능한 읽기/검색 계층 역할을 한다.
 
@@ -207,8 +206,6 @@ PostgreSQL은 관계형 정제 데이터와 운영 queue를 함께 저장한다.
 - `paper_fulltexts`
 - `paper_chunks`
 - `paper_embeddings`
-- `topics`
-- `topic_documents`
 
 운영 테이블은 다음과 같다.
 
@@ -243,9 +240,9 @@ PostgreSQL은 관계형 정제 데이터와 운영 queue를 함께 저장한다.
 
 즉 현재 retrieval 병목은 "벡터가 아예 없어서 검색이 안 되는 상태"가 아니라, 이미 동작하는 lexical/vector 기반을 어떻게 answer chain에 맞게 더 정교하게 고도화할 것인가에 가깝다.
 
-## 8. `TopicDocument` 계약
+## 8. `PaperDetailDocument` 계약
 
-시스템 전반의 공용 계약은 `TopicDocument`다.
+논문 상세 문서의 공용 계약은 `PaperDetailDocument`다.
 
 ```python
 class PaperRef(BaseModel):
@@ -260,21 +257,15 @@ class PaperRef(BaseModel):
     github_stars: int | None = None
     citation_count: int | None = None
 
-class RelatedTopic(BaseModel):
-    topic_id: int
-    title: str
-
-class TopicDocument(BaseModel):
-    topic_id: int
+class PaperDetailDocument(BaseModel):
+    arxiv_id: str
     title: str
     overview: str
     key_findings: list[str]
-    papers: list[PaperRef]
-    related_topics: list[RelatedTopic]
     generated_at: datetime
 ```
 
-이 계약은 저장 계층, 생성 체인, UI 소비 계층 모두가 공유한다. 현재 역할 재편 이후에도 이 계약은 보호 대상이다.
+`PaperDetailDocument`는 생성 체인의 출력이자 UI 소비 계층의 입력이다. 필드 변경은 시스템 전반 변경으로 취급한다.
 
 ## 9. 추적과 점검
 
@@ -286,7 +277,11 @@ LangSmith는 단계별 trace를 남기는 데 사용한다. 현재 기준 핵심
 - `consume_prepare_queue`
 - `embed_papers`
 - `enrich_papers_metadata`
-- `analyze_topics`
+- `analyze_paper_detail`
+- `paper_overview`
+- `paper_key_findings`
+- `translation`
+- `detailed_summary`
 - `rag_answer`
 
 운영 점검용 아티팩트도 함께 존재한다.
@@ -311,7 +306,7 @@ LangSmith는 단계별 trace를 남기는 데 사용한다. 현재 기준 핵심
 - retrieval 고도화와 평가셋 정교화
 - answer chain과 citation 정책
 - 한국어 번역과 상세 요약 규칙
-- topic document 생성 품질과 평가 루프
+- 논문 상세 문서 생성 품질과 평가 루프
 - Streamlit 소비 계층 완성
 
 즉 지금의 아키텍처 병목은 더 이상 "기반 파이프라인이 존재하지 않는다"가 아니라, "준비된 검색/적재 기반을 어떻게 더 좋은 사용자 경험으로 연결할 것인가"에 있다.

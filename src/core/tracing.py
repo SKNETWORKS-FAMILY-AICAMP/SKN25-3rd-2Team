@@ -1,21 +1,21 @@
-"""토픽 분석 체인의 LangSmith trace 구성을 생성하는 모듈"""
+"""논문 분석 체인의 LangSmith trace 구성을 생성하는 모듈"""
 
 from typing import Any, Dict, Optional
 from src.shared import build_langsmith_trace_context
 
 def build_analysis_trace_config(
     *,
-    stage: str = "analyze_topic",
+    stage: str = "analyze_paper_detail",
     runtime: str = "dev",
     user: Optional[str] = None,
     quality_score: Optional[float] = None,
     eval_tags: Optional[list[str]] = None,
     extra_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """토픽 분석 체인의 LangSmith trace 설정을 생성합니다.
-    
+    """논문 분석 체인의 LangSmith trace 설정을 생성합니다.
+
     Args:
-        stage: 실행 단계 ("analyze_topic", "overview", "key_findings" 등). 기본값: "analyze_topic"
+        stage: 실행 단계 ("analyze_paper_detail", "paper_overview", "paper_key_findings" 등). 기본값: "analyze_paper_detail"
         runtime: 실행 환경 ("dev", "airflow", "local" 등). 기본값: "dev"
         user: 실행 사용자 ID (선택, LangSmith에 기록). 기본값: None
         quality_score: 평가 점수 (0.0~1.0, 선택, 평가 루프용). 기본값: None
@@ -40,10 +40,6 @@ def build_analysis_trace_config(
     """
     # 입력값 검증
     valid_stages = {
-        "analyze_topic",
-        "overview",
-        "key_findings",
-        "topic_document",
         "translation",
         "detailed_summary",
         "analyze_paper_detail",
@@ -89,53 +85,6 @@ def build_analysis_trace_config(
         return context.as_langchain_config()
     except Exception as e:
         raise RuntimeError(f"LangSmith trace 설정 생성 실패: {e}") from e
-
-def build_overview_trace_config(
-    *,
-    runtime: str = "dev",
-    user: Optional[str] = None,
-    quality_score: Optional[float] = None,
-) -> Dict[str, Any]:
-    """토픽 개요 생성을 위한 trace 설정 (편의 함수).
-    
-    Args:
-        runtime: 실행 환경. 기본값: "dev"
-        user: 실행 사용자 ID. 기본값: None
-        quality_score: 개요 품질 점수 (0.0~1.0). 기본값: None
-    
-    Returns:
-        Dict[str, Any]: LangChain config
-    """
-    return build_analysis_trace_config(
-        stage="overview",
-        runtime=runtime,
-        user=user,
-        quality_score=quality_score,
-    )
-
-def build_key_findings_trace_config(
-    *,
-    runtime: str = "dev",
-    user: Optional[str] = None,
-    quality_score: Optional[float] = None,
-) -> Dict[str, Any]:
-    """토픽 핵심 발견 생성을 위한 trace 설정 (편의 함수).
-    
-    Args:
-        runtime: 실행 환경. 기본값: "dev"
-        user: 실행 사용자 ID. 기본값: None
-        quality_score: 핵심 발견 품질 점수 (0.0~1.0). 기본값: None
-    
-    Returns:
-        Dict[str, Any]: LangChain config
-    """
-    return build_analysis_trace_config(
-        stage="key_findings",
-        runtime=runtime,
-        user=user,
-        quality_score=quality_score,
-    )
-
 
 def build_paper_overview_trace_config(
     *,

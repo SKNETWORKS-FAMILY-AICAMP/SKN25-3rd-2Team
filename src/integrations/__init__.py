@@ -7,7 +7,6 @@ __all__ = [
     "PaperRepository",
     "PaperSearchClient",
     "RawPaperStore",
-    "TopicRepository",
     "VectorRepository",
 ]
 
@@ -37,10 +36,6 @@ def __getattr__(name: str):
         from .raw_store import RawPaperStore
 
         return RawPaperStore
-    if name == "TopicRepository":
-        from .topic_repository import TopicRepository
-
-        return TopicRepository
     if name == "VectorRepository":
         from .vector_repository import VectorRepository
 

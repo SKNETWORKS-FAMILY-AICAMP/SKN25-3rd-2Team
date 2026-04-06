@@ -2,7 +2,7 @@
 
 ## 1. 목표
 
-ArXplore는 최신 AI 논문을 수집하고, 이를 구조화된 topic document와 RAG 기반 질의응답으로 재구성해 사용자가 더 빠르게 이해할 수 있도록 돕는 플랫폼을 만드는 것을 목표로 한다. 단순 논문 링크 모음이나 abstract 뷰어가 아니라, `검색`, `문서형 탐색`, `한국어 요약`, `근거 기반 응답`을 한 제품 흐름으로 묶는 것이 핵심이다.
+ArXplore는 최신 AI 논문을 수집하고, 이를 구조화된 논문 상세 문서와 RAG 기반 질의응답으로 재구성해 사용자가 더 빠르게 이해할 수 있도록 돕는 플랫폼을 만드는 것을 목표로 한다. 단순 논문 링크 모음이나 abstract 뷰어가 아니라, `검색`, `논문 상세 탐색`, `한국어 요약`, `근거 기반 응답`을 한 제품 흐름으로 묶는 것이 핵심이다.
 
 ArXplore가 해결하려는 문제는 다음과 같다.
 
@@ -13,8 +13,8 @@ ArXplore가 해결하려는 문제는 다음과 같다.
 
 따라서 본 서비스는 두 가지 경험을 결합한다.
 
-1. 사용자가 질문을 입력하면 관련 논문 청크와 topic document를 검색해 근거 기반으로 답변하는 검색 중심 경험
-2. 사용자가 질문 없이도 토픽 카드와 상세 문서를 따라 최신 AI 연구 흐름을 읽는 탐색 중심 경험
+1. 사용자가 질문을 입력하면 관련 논문 청크를 검색해 근거 기반으로 답변하는 검색 중심 경험
+2. 사용자가 질문 없이도 논문 목록과 상세 문서를 따라 최신 AI 연구 흐름을 읽는 탐색 중심 경험
 
 ## 2. 도메인 범위
 
@@ -27,7 +27,7 @@ ArXplore는 전체 학술 논문 플랫폼이 아니라 최신 AI 연구 탐색 
 - `cs.RO`
 - 필요 시 `stat.ML`
 
-이 범위 제한은 품질 확보 전략이다. 최신 AI 논문만 깊게 다루는 편이 topic 구성, retrieval, prompt, UI 전반을 안정화하기 쉽다.
+이 범위 제한은 품질 확보 전략이다. 최신 AI 논문만 깊게 다루는 편이 논문 상세 구성, retrieval, prompt, UI 전반을 안정화하기 쉽다.
 
 ## 3. 데이터 소스 해석
 
@@ -50,12 +50,13 @@ ArXplore는 세 층의 소스를 구분한다.
 본 프로젝트의 주요 산출물은 다음과 같다.
 
 1. 수집 및 전처리 파이프라인
-2. 논문과 topic을 저장하는 데이터 계층
+2. 논문을 저장하는 데이터 계층
 3. retrieval 계층
-4. `TopicDocument` 생성 체인
-5. RAG 기반 질의응답 계층
-6. Streamlit 기반 검색/탐색 UI
-7. 운영 문서와 역할 문서
+4. 논문 상세 문서(`PaperDetailDocument`) 생성 체인
+5. 한국어 상세 요약 및 근거 번역 체인
+6. RAG 기반 질의응답 계층
+7. Streamlit 기반 검색/탐색 UI
+8. 운영 문서와 역할 문서
 
 ## 5. 현재 단계에서 이미 반영된 것
 
@@ -82,14 +83,13 @@ ArXplore는 세 층의 소스를 구분한다.
 - hybrid retrieval 고도화와 평가셋 정리
 - answer chain과 citation 정책
 - 한국어 번역과 상세 요약 규칙
-- `TopicDocument` 생성 품질과 평가 루프
-- Streamlit 검색/토픽 소비 계층 완성
+- 논문 상세 문서(`PaperDetailDocument`) 생성 품질과 평가 루프
+- Streamlit 논문 목록/상세 소비 계층 완성
 
 현재 범위에서 보수적으로 두는 것은 다음과 같다.
 
 - citation count 정교한 반영
 - GitHub activity 변화량 추적
-- 장기 topic 변화 히스토리
 - 고급 랭킹과 추천 시스템
 - 표, 그림, 수식의 full semantic enrichment
 
@@ -98,7 +98,7 @@ ArXplore는 세 층의 소스를 구분한다.
 현재 저장소는 스캐폴드를 넘어 실제 운영 구조를 갖춘 상태다. 중요한 구현 요소는 아래와 같다.
 
 - 코어 모델
-  - `TopicDocument`, `PaperRef`, `RelatedTopic`
+  - `PaperRef`, `PaperDetailDocument`
 - 파싱 계층
   - `src/integrations/layout_parser_client.py`
   - `src/integrations/fulltext_parser.py`
@@ -116,7 +116,6 @@ ArXplore는 세 층의 소스를 구분한다.
   - `src/pipeline/prepare_papers.py`
   - `src/pipeline/embed_papers.py`
   - `src/pipeline/enrich_papers_metadata.py`
-  - `src/pipeline/analyze_topics.py`
 - DAG
   - `dags/daily_collect.py`
   - `dags/maintenance.py`
@@ -128,25 +127,24 @@ ArXplore는 세 층의 소스를 구분한다.
 
 ### 8-1. 검색 중심 경험
 
-메인 화면 상단에 자연어 질문 입력창을 두고, 시스템은 관련 논문 청크와 topic 문서를 검색한 뒤 근거 기반 답변을 생성한다. 답변에는 citation과 관련 논문, 관련 topic을 함께 표시한다.
+메인 화면 상단에 자연어 질문 입력창을 두고, 시스템은 관련 논문 청크를 검색한 뒤 근거 기반 답변을 생성한다. 답변에는 citation과 관련 논문을 함께 표시한다.
 
-### 8-2. 탐색 중심 경험
+### 8-2. 논문 목록 탐색 경험
 
-사용자가 질문 없이 메인 화면에 진입해도 topic 카드만으로 현재 어떤 AI 연구 흐름이 있는지 파악할 수 있어야 한다.
+사용자가 질문 없이 메인 화면에 진입해도 HF-style 논문 목록만으로 현재 어떤 AI 연구가 올라오는지 파악할 수 있어야 한다.
 
-### 8-3. 문서형 상세 경험
+### 8-3. 논문 상세 경험
 
-topic 상세 페이지는 단순 게시글이 아니라 구조화된 문서다. 최소한 아래를 포함해야 한다.
+논문 상세 페이지는 단순 게시글이 아니라 구조화된 문서다. 최소한 아래를 포함해야 한다.
 
-- 개요
-- 핵심 발견
-- 논문 목록
-- 관련 topic
-- 문서 내부 목차
+- overview (논문 개요)
+- key findings (핵심 포인트)
+- detailed summary (상세 요약 — 메인 본문)
+- translation (근거 chunk 번역)
 
 ## 9. 데이터 계약
 
-시스템 전체가 공유하는 핵심 도메인 계약은 `TopicDocument`다.
+시스템 전체가 공유하는 핵심 도메인 계약은 `PaperRef`와 `PaperDetailDocument`다.
 
 ```python
 class PaperRef(BaseModel):
@@ -161,17 +159,11 @@ class PaperRef(BaseModel):
     github_stars: int | None = None
     citation_count: int | None = None
 
-class RelatedTopic(BaseModel):
-    topic_id: int
-    title: str
-
-class TopicDocument(BaseModel):
-    topic_id: int
+class PaperDetailDocument(BaseModel):
+    arxiv_id: str
     title: str
     overview: str
     key_findings: list[str]
-    papers: list[PaperRef]
-    related_topics: list[RelatedTopic]
     generated_at: datetime
 ```
 
@@ -193,8 +185,6 @@ PostgreSQL은 정제 데이터와 운영 queue를 함께 저장한다.
 - `paper_fulltexts`
 - `paper_chunks`
 - `paper_embeddings`
-- `topics`
-- `topic_documents`
 
 운영 테이블:
 
@@ -226,7 +216,7 @@ PostgreSQL은 정제 데이터와 운영 queue를 함께 저장한다.
 - 성공한 논문에 대해 `embed_papers`를 이어서 수행
 - 결과는 서버 PostgreSQL에 직접 적재
 
-즉 현재 구조는 "서버가 raw를 수집하고 큐를 넣으면, 로컬 worker가 무거운 prepare와 embed를 수행하는 분리형 구조"다. 예전처럼 Airflow가 `prepare_papers`, `embed_papers`, `analyze_topics`를 각각 DAG로 직접 스케줄링하는 모델은 현재 운영 기준이 아니다.
+즉 현재 구조는 "서버가 raw를 수집하고 큐를 넣으면, 로컬 worker가 무거운 prepare와 embed를 수행하는 분리형 구조"다.
 
 ## 12. 파싱 구조
 
@@ -253,7 +243,7 @@ PostgreSQL은 정제 데이터와 운영 queue를 함께 저장한다.
 2. lexical, vector, hybrid retrieval이 관련 논문 청크를 조회한다
 3. retrieval 결과를 answer chain이 조합한다
 4. LLM이 검색 결과 범위 안에서 답변한다
-5. 답변과 함께 citation, 관련 논문, 관련 topic을 표시한다
+5. 답변과 함께 citation, 관련 논문을 표시한다
 
 현재 핵심 원칙은 다음 두 가지다.
 
@@ -282,17 +272,18 @@ PostgreSQL은 정제 데이터와 운영 queue를 함께 저장한다.
 - 상세 요약 구조
 - 용어 및 문체 기준
 
-### Phase 4. topic document 정리
+### Phase 4. 논문 상세 문서 정리
 
-- chain 안정화
+- `PaperDetailDocument` 생성 chain 안정화
+- overview / key findings 품질 개선
 - 평가 루프 정리
 
 ### Phase 5. UI 통합
 
-- 검색 화면
-- 카드 영역
-- 상세 문서 영역
-- answer payload와 topic document 소비
+- 논문 목록 화면
+- 논문 상세 화면
+- 검색 + answer payload 소비
+- 상세 요약 / 번역 연결
 
 ## 15. 역할 분담 전제
 
@@ -301,7 +292,7 @@ ArXplore는 현재 5역할 병렬 개발을 전제로 한다.
 - Retrieval · 검색 품질
 - RAG 응답 · 근거 제어
 - 한국어 번역 · 상세 요약 프롬프트
-- 토픽 문서 · 프롬프트 평가
+- 논문 상세 · 프롬프트 평가
 - UI · 문서 소비 계층
 
 상세 역할 경계와 handoff는 [ROLES.md](./ROLES.md)를 기준으로 한다.
@@ -314,6 +305,7 @@ ArXplore는 현재 5역할 병렬 개발을 전제로 한다.
 - `python3 -m compileall src app dags`
 - `bash scripts/prepare-worker.sh once`
 - `streamlit run app/main.py --server.address=0.0.0.0`
+- `streamlit run app/paper_detail_demo.py --server.address=0.0.0.0`
 - Airflow DAG 목록에 `arxplore_daily_collect`, `arxplore_maintenance`가 표시되는지 확인
 - `notebooks/retrieval_inspection.ipynb`로 적재 상태와 retrieval 결과를 확인
 
@@ -327,5 +319,6 @@ ArXplore는 현재 5역할 병렬 개발을 전제로 한다.
 - citation count 실시간 추적
 - 복잡한 추천 시스템
 - 고급 문서 버전 비교
+- 토픽 단위 그룹핑/클러스터링
 
 이 비목표를 분명히 해야 ArXplore가 "최신 AI 연구를 한국어로 빠르게 이해하고 질문할 수 있게 하는 탐색 도구"라는 본래 목적에 집중할 수 있다.

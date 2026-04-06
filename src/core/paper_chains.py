@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from src.shared import get_settings
 
 from .models import PaperDetailDocument
-from .prompts import PAPER_KEY_FINDINGS_PROMPT, PAPER_OVERVIEW_PROMPT
+from .prompts import KEY_FINDINGS_PROMPT, OVERVIEW_PROMPT
 from .tracing import build_paper_key_findings_trace_config, build_paper_overview_trace_config
 
 
@@ -190,7 +190,7 @@ def build_paper_overview(
     if not has_paper_detail_context(normalized):
         raise ValueError("상세 논문 설명을 생성하려면 본문 섹션 또는 fulltext_text가 필요합니다.")
 
-    chain = PAPER_OVERVIEW_PROMPT | _build_llm() | StrOutputParser()
+    chain = OVERVIEW_PROMPT | _build_llm() | StrOutputParser()
     config = build_paper_overview_trace_config(
         runtime=runtime,
         user=user,
@@ -216,7 +216,7 @@ def build_paper_key_findings(
     if not has_paper_detail_context(normalized):
         raise ValueError("상세 논문 설명을 생성하려면 본문 섹션 또는 fulltext_text가 필요합니다.")
 
-    chain = PAPER_KEY_FINDINGS_PROMPT | _build_llm() | StrOutputParser()
+    chain = KEY_FINDINGS_PROMPT | _build_llm() | StrOutputParser()
     config = build_paper_key_findings_trace_config(
         runtime=runtime,
         user=user,
