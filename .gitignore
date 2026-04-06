@@ -22,3 +22,4 @@ Thumbs.db
 
 tests/
 prepare_*.log
+test_streamlit.py
