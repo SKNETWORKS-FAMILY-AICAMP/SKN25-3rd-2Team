@@ -2,6 +2,7 @@ feedparser>=6.0
 ipykernel==6.29.5
 jupyterlab==4.4.1
 langchain==0.3.25
+langgraph==0.4.1
 langchain-openai==0.3.17
 langchain-postgres==0.0.15
 langchain-text-splitters==0.3.8
@@ -17,3 +18,4 @@ python-dotenv==1.1.0
 requests==2.33.0
 SQLAlchemy==2.0.48
 streamlit==1.44.1
+tiktoken>=0.7

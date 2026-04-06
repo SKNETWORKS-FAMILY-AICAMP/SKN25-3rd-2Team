@@ -1,4 +1,4 @@
-"""역할 3/4 결과물을 한 화면에서 점검하는 Streamlit 데모"""
+"""논문 상세 출력 흐름을 점검하는 Streamlit 데모"""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import os
 import streamlit as st
 
 from src.core import PaperDetailDocument, analyze_paper_detail, build_detailed_summary, has_paper_detail_context, translate_chunk
+from src.integrations import PaperRepository
 
 st.set_page_config(page_title="ArXplore Paper Detail Demo", layout="wide")
 
@@ -69,11 +70,50 @@ def _build_sample_paper() -> dict:
     }
 
 
+@st.cache_resource(show_spinner=False)
+def _get_paper_repository() -> PaperRepository:
+    return PaperRepository()
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def _list_recent_paper_cards(limit: int = 12) -> list[dict]:
+    return _get_paper_repository().list_recent_paper_cards(limit=limit)
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def _load_paper_from_db(arxiv_id: str) -> dict | None:
+    repository = _get_paper_repository()
+    paper = repository.get_paper(arxiv_id)
+    if not paper:
+        return None
+
+    fulltext = repository.get_paper_fulltext(arxiv_id) or {}
+    chunks = repository.list_paper_chunks(arxiv_id, limit=20)
+
+    merged = dict(paper)
+    if fulltext:
+        merged["fulltext"] = fulltext
+        merged["text"] = fulltext.get("text") or ""
+        merged["sections"] = fulltext.get("sections") or []
+    else:
+        merged["text"] = ""
+        merged["sections"] = []
+    merged["chunks"] = chunks
+    return merged
+
+
+def _chunk_label(chunk: dict) -> str:
+    section = str(chunk.get("section_title") or "Untitled").strip() or "Untitled"
+    index = chunk.get("chunk_index")
+    preview = " ".join(str(chunk.get("chunk_text") or "").split())[:72]
+    return f"c{index} · {section} · {preview}"
+
+
 def _render_paper_detail(document: PaperDetailDocument) -> None:
     st.subheader(document.title)
     st.caption(f"arXiv {document.arxiv_id} · generated_at {document.generated_at.strftime('%Y-%m-%d %H:%M')}")
 
-    st.markdown("### Overview")
+    st.markdown("### AI-Generated Summary")
     st.write(document.overview)
 
     st.markdown("### Key Findings")
@@ -84,117 +124,156 @@ def _render_paper_detail(document: PaperDetailDocument) -> None:
         st.caption("핵심 포인트가 아직 없습니다.")
 
 
-def _build_mock_paper_detail(sample_paper: dict) -> PaperDetailDocument:
-    return PaperDetailDocument(
-        arxiv_id=sample_paper["arxiv_id"],
-        title=sample_paper["title"],
-        overview=(
-            "이 논문은 speculative decoding의 효율이 draft model 하나의 평균 성능보다 작업별 proposal 분포에 "
-            "더 민감하다는 점을 전제로 출발한다. 단일 범용 draft를 고정해 쓰는 대신, 작업 신호와 confidence 패턴에 "
-            "맞춰 proposal behavior를 조정하는 task-aware routing 구조를 제안한다. 실험에서는 MT-Bench, GSM8K, "
-            "MATH-500 같은 혼합 작업 환경에서 generic drafting 대비 verification 효율이 더 안정적으로 개선되는 경향을 보인다. "
-            "다만 inference-time task cue가 약하거나 draft specialization 데이터가 부족한 경우에는 이점이 줄어들 수 있다."
-        ),
-        key_findings=[
-            "효율 향상은 단일 draft의 평균 품질보다 작업별 proposal 분포 정합성에 더 크게 좌우된다.",
-            "task-aware routing은 heterogeneous workload에서 generic draft 대비 verification 부담을 더 안정적으로 줄인다.",
-            "평가 벤치마크 조합에 따라 이점의 크기가 달라지므로 mixed-task 기준 비교가 중요하다.",
-            "routing signal이 약하거나 specialization 데이터가 부족하면 성능 이점이 줄어들 수 있다.",
-        ],
-        generated_at=datetime.now(),
-    )
-
-
 st.title("Paper Detail Demo")
-st.caption("역할 3 언어 레이어와 역할 4 paper detail 출력을 함께 점검하는 테스트용 데모")
+st.caption("논문 상세 페이지 출력 흐름을 확인하는 테스트용 데모")
 
 sample_paper = _build_sample_paper()
-default_chunk = sample_paper["sections"][2]["text"]
-default_fulltext = "\n\n".join(f"[{section['title']}]\n{section['text']}" for section in sample_paper["sections"])
+
+db_error: str | None = None
+db_papers: list[dict] = []
+selected_paper = sample_paper
 
 with st.sidebar:
     st.markdown("### Demo Controls")
     use_live_llm = st.toggle("LLM 호출 실행", value=False)
     st.caption("OPENAI_API_KEY가 설정된 경우에만 실행하세요.")
-    st.markdown("### Sample Paper")
-    st.write(sample_paper["title"])
-    st.write(f"context ready: {has_paper_detail_context(sample_paper)}")
+    use_db_source = st.toggle("DB에서 논문 불러오기", value=False)
+
+    if use_db_source:
+        try:
+            db_papers = _list_recent_paper_cards()
+        except Exception as exc:
+            db_error = f"{type(exc).__name__}: {exc}"
+        if db_error:
+            st.warning(f"DB 연결 실패: {db_error}")
+        elif db_papers:
+            st.caption("메인 목록 성능을 위해 최근 논문 카드 12개만 먼저 불러옵니다.")
+
+    if use_db_source and db_papers:
+        paper_options = {
+            f"{paper['arxiv_id']} · {paper['title']}": paper["arxiv_id"]
+            for paper in db_papers
+        }
+        selected_label = st.selectbox("논문 선택", list(paper_options.keys()))
+        selected_arxiv_id = paper_options[selected_label]
+        loaded_paper = _load_paper_from_db(selected_arxiv_id)
+        if loaded_paper:
+            selected_paper = loaded_paper
+        else:
+            st.warning("선택한 논문을 DB에서 읽지 못해 샘플 논문으로 대체합니다.")
+
+    st.markdown("### Selected Paper")
+    st.write(selected_paper["title"])
+    st.write(f"context ready: {has_paper_detail_context(selected_paper)}")
     st.write(f"OPENAI_API_KEY set: {bool(os.environ.get('OPENAI_API_KEY'))}")
+    if use_db_source and db_papers:
+        st.write(f"sections: {len(selected_paper.get('sections') or [])}")
+        st.write(f"chunks: {len(selected_paper.get('chunks') or [])}")
+
+current_paper_id = str(selected_paper.get("arxiv_id") or "unknown")
+if st.session_state.get("_paper_detail_demo_active_paper_id") != current_paper_id:
+    st.session_state["_paper_detail_demo_active_paper_id"] = current_paper_id
+    st.session_state.pop("_paper_detail_demo_top_summary", None)
+    st.session_state.pop("_paper_detail_demo_detailed_summary", None)
+    st.session_state.pop("_paper_detail_demo_translation", None)
+
+available_chunks = selected_paper.get("chunks") or []
+default_chunk = (
+    available_chunks[0]["chunk_text"]
+    if available_chunks
+    else (
+        (selected_paper.get("sections") or [{}])[0].get("text")
+        or selected_paper.get("abstract")
+        or ""
+    )
+)
+default_fulltext = (
+    selected_paper.get("text")
+    or "\n\n".join(f"[{section['title']}]\n{section['text']}" for section in selected_paper["sections"])
+)
 
 st.markdown("## 입력 데이터")
 col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("### Chunk Translation Input")
-    chunk_text = st.text_area("chunk_text", value=default_chunk, height=180)
+    if available_chunks:
+        chunk_labels = [_chunk_label(chunk) for chunk in available_chunks]
+        selected_chunk_label = st.selectbox("근거 청크 선택", chunk_labels)
+        selected_chunk = available_chunks[chunk_labels.index(selected_chunk_label)]
+        chunk_text = st.text_area("chunk_text", value=selected_chunk["chunk_text"], height=180)
+    else:
+        chunk_text = st.text_area("chunk_text", value=default_chunk, height=180)
 
 with col2:
     st.markdown("### Detailed Summary Input")
     summary_text = st.text_area("paper text", value=default_fulltext, height=180)
 
 st.divider()
-st.markdown("## 통합 미리보기")
-st.caption("메인 방향은 paper detail 최종 출력이다. 역할 4 결과는 보조 구조로 보고, 역할 3 출력과 함께 확인한다.")
+st.markdown("## 논문 상세")
+st.caption("상단 요약을 먼저 두고, 상세 요약과 근거 번역은 각각 버튼을 눌러 생성합니다.")
 
-connected_col1, connected_col2 = st.columns(2)
-
-with connected_col1:
-    st.markdown("### 사용자에게 보여줄 상세 설명")
-    if use_live_llm and st.button("Build Connected Detailed Summary", use_container_width=True):
+if st.button("상단 요약 생성", use_container_width=True, key="generate_top_summary"):
+    if use_live_llm:
         try:
-            detailed_summary = build_detailed_summary(
-                title=sample_paper["title"],
-                authors=sample_paper["authors"],
+            st.session_state["_paper_detail_demo_top_summary"] = analyze_paper_detail(selected_paper)
+        except Exception as exc:
+            st.error(f"요약 생성 실패: {type(exc).__name__}: {exc}")
+    else:
+        st.info("LLM 호출 실행을 켜야 실제 상단 요약을 생성할 수 있습니다.")
+
+top_summary_document = st.session_state.get("_paper_detail_demo_top_summary")
+if isinstance(top_summary_document, PaperDetailDocument):
+    _render_paper_detail(top_summary_document)
+else:
+    st.caption("상단 요약이 아직 생성되지 않았습니다.")
+
+st.divider()
+st.markdown("## 상세 요약 보기")
+st.caption("논문을 더 길게 설명하는 본문형 요약입니다. 버튼을 눌러서만 생성합니다.")
+
+if st.button("상세 요약 생성", use_container_width=True, key="generate_detailed_summary"):
+    if use_live_llm:
+        try:
+            st.session_state["_paper_detail_demo_detailed_summary"] = build_detailed_summary(
+                title=selected_paper["title"],
+                authors=selected_paper["authors"],
                 text=summary_text,
+                sections=selected_paper.get("sections"),
             )
-            st.write(detailed_summary)
         except Exception as exc:
             st.error(f"상세 요약 실패: {type(exc).__name__}: {exc}")
     else:
-        st.write(
-            "문제 정의: 기존 speculative decoding은 단일 범용 draft에 의존해 작업별 verification 특성을 충분히 반영하지 못한다.\n\n"
-            "접근 방법: 이 논문은 task-aware proposal distribution과 inference-time routing을 결합해 draft behavior를 작업별로 조정한다.\n\n"
-            "실험 및 결과: MT-Bench, GSM8K, MATH-500 기반 평가에서 generic drafting 대비 verification 효율 개선 경향을 보인다.\n\n"
-            "한계: routing signal이 약하거나 draft specialization 데이터가 부족하면 효과가 줄어들 수 있다.\n\n"
-            "핵심 가치: 단일 평균 성능 좋은 draft보다 작업별 proposal 정합성이 더 중요하다는 점을 구조적으로 드러낸다."
-        )
+        st.info("LLM 호출 실행을 켜야 실제 상세 요약을 생성할 수 있습니다.")
 
-with connected_col2:
-    st.markdown("### 근거 청크 번역")
-    if use_live_llm and st.button("Translate Support Chunk", use_container_width=True):
+detailed_summary_text = st.session_state.get("_paper_detail_demo_detailed_summary")
+if detailed_summary_text:
+    st.write(detailed_summary_text)
+else:
+    st.caption("상세 요약이 아직 생성되지 않았습니다.")
+
+st.divider()
+st.markdown("## 근거 문장 번역")
+st.caption("상세 요약이나 답변의 근거가 되는 영어 원문 청크를 한국어로 확인합니다. 버튼을 눌러서만 생성합니다.")
+
+if st.button("근거 번역 생성", use_container_width=True, key="generate_translation"):
+    if use_live_llm:
         try:
-            translated = translate_chunk(chunk_text)
-            st.write(translated)
+            st.session_state["_paper_detail_demo_translation"] = translate_chunk(chunk_text)
         except Exception as exc:
             st.error(f"번역 실패: {type(exc).__name__}: {exc}")
     else:
-        st.write(
-            "TAPS는 task 신호와 confidence 패턴을 바탕으로 specialized draft behavior를 선택하는 "
-            "inference-time routing 전략을 도입한다."
-        )
+        st.info("LLM 호출 실행을 켜야 실제 근거 번역을 생성할 수 있습니다.")
 
-st.divider()
-st.markdown("## 역할 4 보조 출력")
-st.caption("overview / key findings는 구조화 보조 정보로 확인한다. 메인 최종 출력보다 후순위다.")
-
-if use_live_llm:
-    if st.button("Generate Paper Detail Support Output", use_container_width=True):
-        try:
-            detail_document = analyze_paper_detail(sample_paper)
-            _render_paper_detail(detail_document)
-        except Exception as exc:
-            st.error(f"Paper detail 생성 실패: {type(exc).__name__}: {exc}")
+translated_chunk = st.session_state.get("_paper_detail_demo_translation")
+if translated_chunk:
+    st.write(translated_chunk)
 else:
-    mock_document = _build_mock_paper_detail(sample_paper)
-    _render_paper_detail(mock_document)
-    st.info("현재는 mock preview입니다. 사이드바에서 `LLM 호출 실행`을 켜면 실제 체인을 호출합니다.")
+    st.caption("근거 번역이 아직 생성되지 않았습니다.")
 
 st.divider()
-st.markdown("## 해석")
-st.write(
-    "현재 데모에서 메인 최종 출력은 역할 3의 상세 요약과 청크 번역이다. "
-    "역할 4의 overview와 key findings는 보조 설명 구조로 남겨두고, 최종 사용자 경험에서는 후순위로 본다."
-)
+st.markdown("## 현재 흐름")
+st.write("상단 요약을 먼저 보고, 사용자가 원할 때 상세 요약과 근거 번역을 각각 생성하는 흐름입니다.")
 
 st.divider()
 st.markdown("## 실행 방법")

@@ -21,11 +21,14 @@ def _build_llm() -> ChatOpenAI:
     if not settings.openai_api_key:
         raise ValueError("OPENAI_API_KEY가 설정되지 않아 논문 상세 문서를 생성할 수 없습니다.")
 
-    return ChatOpenAI(
-        model=settings.openai_model,
-        api_key=settings.openai_api_key,
-        temperature=0.2,
-    )
+    kwargs = {
+        "model": settings.openai_model,
+        "api_key": settings.openai_api_key,
+    }
+    if not settings.openai_model.startswith("gpt-5"):
+        kwargs["temperature"] = 0.2
+
+    return ChatOpenAI(**kwargs)
 
 
 def _compact_text(value: Any, *, max_chars: int) -> str:

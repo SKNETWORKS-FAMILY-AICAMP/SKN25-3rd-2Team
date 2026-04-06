@@ -1,4 +1,4 @@
-"""핵심 도메인 계층의 공개 인터페이스를 노출하는 모듈"""
+"""핵심 도메인 계층의 공개 인터��이스를 노출하는 모듈"""
 
 from .models import PaperDetailDocument, PaperRef
 from .paper_chains import analyze_paper_detail, build_paper_key_findings, build_paper_overview, has_paper_detail_context

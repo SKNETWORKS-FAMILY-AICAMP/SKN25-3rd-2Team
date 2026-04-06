@@ -180,6 +180,31 @@ class PaperRepository:
             )
         return papers
 
+    def list_recent_paper_cards(self, *, limit: int = 12) -> list[dict[str, Any]]:
+        """메인 목록 렌더링에 필요한 최소 논문 카드 정보만 조회한다."""
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT arxiv_id, title, pdf_url, published_at, updated_at
+                FROM papers
+                ORDER BY COALESCE(published_at, updated_at_utc) DESC
+                LIMIT %s
+                """,
+                (max(1, limit),),
+            )
+            rows = cursor.fetchall()
+
+        return [
+            {
+                "arxiv_id": row[0],
+                "title": row[1],
+                "pdf_url": row[2],
+                "published_at": row[3].isoformat() if row[3] else None,
+                "updated_at": row[4].isoformat() if row[4] else None,
+            }
+            for row in rows
+        ]
+
     def list_papers_missing_arxiv_metadata(self, *, limit: int = 200) -> list[dict[str, Any]]:
         """arXiv 보강이 아직 충분히 적용되지 않은 논문 목록을 조회한다."""
         with self._connection() as connection, connection.cursor() as cursor:
